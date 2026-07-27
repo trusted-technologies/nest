@@ -241,9 +241,18 @@ func dbDefaults(job *config.Job) (host string, port int, user string) {
 }
 
 // mysqlArgs builds the common connection arguments for mysql/mysqldump.
+// For a local server (host "localhost") no -h/-P is passed at all: the
+// client then uses the default unix socket — the same as `sudo mysql` —
+// which makes passwordless socket auth (auth_socket/unix_socket) work.
+// "127.0.0.1" or any other host goes over TCP as before.
 func mysqlArgs(job *config.Job) []string {
 	host, port, user := dbDefaults(job)
-	args := []string{"-h", host, "-P", strconv.Itoa(port), "-u", user}
+	var args []string
+	if host == "localhost" {
+		args = []string{"-u", user}
+	} else {
+		args = []string{"-h", host, "-P", strconv.Itoa(port), "-u", user}
+	}
 	if job.DBPassword != "" {
 		args = append(args, "-p"+job.DBPassword)
 	}

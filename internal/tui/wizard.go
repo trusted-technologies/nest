@@ -89,12 +89,13 @@ func (a *app) wizard() error {
 		return nil
 	}
 
-	showNote("Enable the backup timer",
-		"Backups run via a systemd timer. Enable it with:\n\n  systemctl enable --now nest.timer")
 	if err := exec.Command("systemctl", "enable", "--now", "nest.timer").Run(); err != nil {
-		showNote("Timer not enabled",
-			"Could not run `systemctl enable --now nest.timer`:\n\n"+err.Error()+
-				"\n\nEnable it manually once the nest service is installed.")
+		showNote("Enable the backup timer manually",
+			"Could not enable the timer automatically:\n\n"+err.Error()+
+				"\n\nRun it yourself once systemd is available:\n\n  systemctl enable --now nest.timer")
+	} else {
+		showNote("Backup timer enabled",
+			"nest.timer is enabled and running — backups now follow their schedules.\nCheck anytime with: systemctl list-timers nest.timer")
 	}
 	return nil
 }
