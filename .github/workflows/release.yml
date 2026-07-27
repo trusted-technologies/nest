@@ -35,8 +35,9 @@ jobs:
 
       - name: Install packaging tools
         run: |
+          command -v aws || { echo "error: aws CLI missing on runner" >&2; exit 1; }
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm awscli bzip2 unzip
+          sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm bzip2 unzip
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
       - name: Import GPG signing key
