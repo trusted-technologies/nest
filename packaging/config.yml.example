@@ -1,0 +1,100 @@
+# nest example configuration.
+#
+# The real configuration lives at /etc/nest/config.yml (mode 0600) and is
+# normally created and edited through the interactive TUI:
+#
+#     sudo nest setup
+#
+# You may also edit it by hand; the file is plain YAML. All available
+# fields are shown below. Global CLI flags: -c/--config, -v/--verbose.
+
+# Config file format version. Required, currently always 1.
+version: 1
+
+# Default restic repository password. Used by every incremental (restic)
+# job unless the job sets its own restic_password. May also be supplied
+# via the NEST_RESTIC_PASSWORD environment variable.
+# Generated for you during `nest setup`. KEEP THIS SECRET: it is the only
+# key to your encrypted backups.
+encryption_password: "change-me-long-random-string"
+
+# ---------------------------------------------------------------------------
+# Remotes: where backups are stored. Referenced by jobs via their name.
+# ---------------------------------------------------------------------------
+remotes:
+    # Any S3-compatible storage (AWS S3, Wasabi, MinIO, Cloudflare R2, ...).
+  - name: my-s3
+    type: s3
+    endpoint: s3.eu-central-1.amazonaws.com   # without https://
+    region: eu-central-1
+    bucket: my-backup-bucket
+    access_key: AKIAEXAMPLE
+    secret_key: "super-secret"
+    # Optional: prefix every repository path of this remote, useful to
+    # separate several servers inside one bucket.
+    path_prefix: web-1
+
+    # Any SSH server; restic talks SFTP natively. Key auth only:
+    # nest generates /etc/nest/ssh/id_ed25519 during setup if needed.
+  - name: backup-server
+    type: sftp
+    host: 192.0.2.10
+    port: 22
+    user: backup
+    key_file: /etc/nest/ssh/id_ed25519
+    path_prefix: /srv/backups/web-1
+
+    # rclone remotes configured with `rclone config` can be used too:
+    # - name: gdrive
+    #   type: rclone
+    #   rclone_remote: gdrive:backups
+
+# ---------------------------------------------------------------------------
+# Jobs: what is backed up, when, and how long it is kept.
+# ---------------------------------------------------------------------------
+jobs:
+    # Backs up all Pterodactyl game server data.
+    # Presets offered by the TUI: pterodactyl-volumes, pterodactyl-backups,
+    # folder, mysql, postgresql (a preset only pre-fills the fields below).
+  - name: pterodactyl-volumes
+    type: folder                      # folder | mysql | postgresql
+    preset: pterodactyl-volumes
+    source: /var/lib/pterodactyl/volumes
+    remote: my-s3                     # must match a remotes[].name
+    incremental: true                 # true = restic, false = plain .tar.gz
+    schedule: "04:00"                 # "HH:MM" daily, or 5-field cron, e.g. "*/30 * * * *"
+    retention:
+      last: 0                         # keep last N snapshots
+      daily: 3
+      weekly: 1
+      monthly: 0
+    exclude:                          # glob patterns relative to source
+      - "*/cache/**"
+      - "*.tmp"
+    enabled: true
+    # restic_password: ""             # per-job override of encryption_password
+
+    # MySQL / MariaDB: streams mysqldump output to the remote.
+  - name: mysql
+    type: mysql
+    remote: backup-server
+    incremental: true
+    schedule: "03:00"
+    retention:
+      daily: 7
+    db_host: localhost
+    db_port: 3306
+    db_user: root
+    db_password: "secret"
+    databases: []                     # empty = all databases
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# Notifications.
+# ---------------------------------------------------------------------------
+notifications:
+  telegram:
+    enabled: false
+    bot_token: "123456:ABC-your-bot-token"   # from @BotFather
+    chat_id: "123456789"
+    thread_id: ""                             # optional forum topic id

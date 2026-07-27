@@ -1,0 +1,11 @@
+[Unit]
+Description=nest backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/nest backup --scheduled
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

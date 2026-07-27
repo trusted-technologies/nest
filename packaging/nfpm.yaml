@@ -1,0 +1,48 @@
+# nfpm configuration for nest (https://github.com/goreleaser/nfpm).
+#
+# The following environment variables are expanded by nfpm and must be set
+# by the caller (see scripts/package.sh):
+#   ${ARCH}     - Go-style arch: amd64 | arm64 | armhf
+#   ${VERSION}  - package version, e.g. 1.0.0
+#   ${SRC}      - path to the nest binary for ${ARCH}
+name: nest
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: nest <repo@trust-me.host>
+vendor: nest
+license: MIT
+homepage: https://github.com/trusted-technologies/nest
+description: |
+  Simple server backups.
+  Back up folders and MySQL/PostgreSQL databases to S3, SFTP or any
+  rclone remote using restic (incremental, encrypted, deduplicated)
+  or plain .tar.gz archives. Includes an interactive setup TUI,
+  systemd-timer scheduling and Telegram notifications.
+contents:
+  - src: ${SRC}
+    dst: /usr/bin/nest
+    file_info:
+      mode: 0755
+  - src: packaging/nest.service
+    dst: /usr/lib/systemd/system/nest.service
+    file_info:
+      mode: 0644
+  - src: packaging/nest.timer
+    dst: /usr/lib/systemd/system/nest.timer
+    file_info:
+      mode: 0644
+  - src: packaging/config.yml.example
+    dst: /etc/nest/config.yml.example
+    file_info:
+      mode: 0640
+recommends:
+  - ca-certificates
+  - restic
+  - rclone
+scripts:
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
