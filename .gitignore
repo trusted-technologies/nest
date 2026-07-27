@@ -1,0 +1,5 @@
+.tools/
+dist/
+*.deb
+*.rpm
+__pycache__/
