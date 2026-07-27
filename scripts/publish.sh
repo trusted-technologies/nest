@@ -6,7 +6,7 @@
 # and the repository signing key (shared by all projects) under /keys:
 #
 #   scripts/install.sh                    -> /nest/install.sh
-#   VERSION                               -> /nest/VERSION
+#   dist/VERSION                          -> /nest/VERSION
 #   dist/bin/nest-linux-*                 -> /nest/bin/   \
 #   dist/tools/bin/*                      -> /nest/bin/    } synced with --delete
 #   dist/repo/apt                         -> /nest/apt/    }
@@ -16,6 +16,12 @@
 # --delete is used ONLY under /nest/{bin,apt,yum}, so stale artifacts are
 # removed there. Everything else in the bucket (other projects, /keys) is
 # never touched.
+#
+# Cache-Control: the mirror sits behind the Cloudflare CDN, which happily
+# serves stale repo metadata (the classic apt "Hash Sum mismatch"). All
+# frequently-changing files (repo indices, VERSION, install.sh, checksums,
+# nest binaries) are uploaded with no-cache; only big immutable artifacts
+# (.deb/.rpm in pool/, helper binaries) get a long cache lifetime.
 #
 # Required environment:
 #   R2_ENDPOINT            e.g. https://<account-id>.r2.cloudflarestorage.com
@@ -39,6 +45,9 @@ done
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 BASE="${NEST_MIRROR_BASE:-https://mirror.trust-me.host/nest}"
 
+NOCACHE="no-cache"                 # revalidate every request
+LONGCACHE="public, max-age=86400"  # immutable content, cache for a day
+
 s3() { aws --endpoint-url "$R2_ENDPOINT" s3 "$@"; }
 
 # --- stage /nest/bin: nest binaries + helper tools into one tree --------------
@@ -48,18 +57,43 @@ mkdir -p "$staging/bin"
 cp dist/bin/nest-linux-* "$staging/bin/"
 cp dist/tools/bin/* "$staging/bin/"
 
+# Version file: CI writes the resolved version to dist/VERSION (auto
+# 1.0.<run-number>); local publishes fall back to the repo VERSION file.
+VERSION_FILE=dist/VERSION
+[ -f "$VERSION_FILE" ] || VERSION_FILE=VERSION
+
 echo ">> syncing /nest/{bin,apt,yum} (with --delete)"
-s3 sync "$staging/bin"  "s3://$R2_BUCKET/nest/bin" --delete
-s3 sync dist/repo/apt   "s3://$R2_BUCKET/nest/apt" --delete
-s3 sync dist/repo/yum   "s3://$R2_BUCKET/nest/yum" --delete
+s3 sync "$staging/bin"  "s3://$R2_BUCKET/nest/bin" --delete \
+    --exclude "restic-*" --exclude "rclone-*" --exclude "sha256sums.txt" \
+    --cache-control "$NOCACHE"
+s3 sync "$staging/bin"  "s3://$R2_BUCKET/nest/bin" \
+    --exclude "*" --include "restic-*" --include "rclone-*" \
+    --cache-control "$LONGCACHE"
+s3 cp "$staging/bin/sha256sums.txt" "s3://$R2_BUCKET/nest/bin/sha256sums.txt" \
+    --cache-control "$NOCACHE"
+
+# apt: pool (immutable .deb) long cache, dists (indices) no-cache
+s3 sync dist/repo/apt/pool  "s3://$R2_BUCKET/nest/apt/pool" --delete \
+    --cache-control "$LONGCACHE"
+s3 sync dist/repo/apt/dists "s3://$R2_BUCKET/nest/apt/dists" --delete \
+    --cache-control "$NOCACHE"
+
+# yum: rpms (immutable) long cache, repodata no-cache
+s3 sync dist/repo/yum "s3://$R2_BUCKET/nest/yum" --delete \
+    --exclude "repodata/*" --cache-control "$LONGCACHE"
+s3 sync dist/repo/yum/repodata "s3://$R2_BUCKET/nest/yum/repodata" --delete \
+    --cache-control "$NOCACHE"
 
 echo ">> uploading top-level files"
-s3 cp scripts/install.sh "s3://$R2_BUCKET/nest/install.sh" --content-type "text/plain; charset=utf-8"
-s3 cp VERSION            "s3://$R2_BUCKET/nest/VERSION"
+s3 cp scripts/install.sh "s3://$R2_BUCKET/nest/install.sh" \
+    --content-type "text/plain; charset=utf-8" --cache-control "$NOCACHE"
+s3 cp "$VERSION_FILE"    "s3://$R2_BUCKET/nest/VERSION" --cache-control "$NOCACHE"
 
 echo ">> uploading the shared repo signing key to /keys"
-s3 cp dist/repo/keys/trusted-technologies.asc "s3://$R2_BUCKET/keys/trusted-technologies.asc" --content-type "text/plain; charset=utf-8"
-s3 cp dist/repo/keys/trusted-technologies.gpg "s3://$R2_BUCKET/keys/trusted-technologies.gpg"
+s3 cp dist/repo/keys/trusted-technologies.asc "s3://$R2_BUCKET/keys/trusted-technologies.asc" \
+    --content-type "text/plain; charset=utf-8" --cache-control "$LONGCACHE"
+s3 cp dist/repo/keys/trusted-technologies.gpg "s3://$R2_BUCKET/keys/trusted-technologies.gpg" \
+    --cache-control "$LONGCACHE"
 
 echo ""
 echo "Published:"

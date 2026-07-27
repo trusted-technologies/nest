@@ -30,6 +30,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Versioning: tag pushes keep their semver (build.sh prefers the exact
+      # tag); every other run gets an auto-incrementing 1.0.<run-number>, so
+      # each publish to the mirror is a newer package version for apt/dnf.
+      - name: Resolve version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag build — version comes from the tag"
+          else
+            echo "1.0.${{ github.run_number }}" > VERSION
+            echo "auto version: $(cat VERSION)"
+          fi
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
