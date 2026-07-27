@@ -7,24 +7,61 @@ import (
 )
 
 // wizard is the first-install flow shown before the main menu: welcome,
-// first remote, first job, Telegram, save, then an optional test backup
-// and systemd timer activation. Aborted (Esc) steps are skipped.
+// remotes (with "add another?"), jobs (with "add another?"), Telegram,
+// save, then an optional test backup and systemd timer activation.
+// Aborted (Esc) steps are skipped.
 func (a *app) wizard() error {
 	err := runFields(huh.NewNote().
 		Title("Welcome to nest").
-		Description("nest backs up this server to S3, SFTP or any rclone remote — on a schedule, with deduplication and encryption.\n\nYour configuration lives at:\n  " + a.configPath + "\n\nThis wizard creates your first remote and backup job.").
+		Description("nest backs up this server to S3, SFTP or any rclone remote — on a schedule, with deduplication and encryption.\n\nYour configuration lives at:\n  " + a.configPath + "\n\nThis wizard sets up your remotes and backup jobs (you can add several of each).").
 		Next(true).
 		NextLabel("Let's go"))
 	if err != nil && !aborted(err) {
 		return err
 	}
 
-	if err := a.addRemote(); err != nil {
-		return err
+	// Remotes: the first one, then offer to add more.
+	for {
+		before := len(a.cfg.Remotes)
+		if err := a.addRemote(); err != nil {
+			return err
+		}
+		if len(a.cfg.Remotes) == before {
+			break // form aborted
+		}
+		more, err := askConfirm("Add another remote?", "", false)
+		if aborted(err) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if !more {
+			break
+		}
 	}
-	if err := a.addJob(); err != nil {
-		return err
+
+	// Jobs: the first one, then offer to add more.
+	for {
+		before := len(a.cfg.Jobs)
+		if err := a.addJob(); err != nil {
+			return err
+		}
+		if len(a.cfg.Jobs) == before {
+			break // form aborted
+		}
+		more, err := askConfirm("Add another backup job?", "", false)
+		if aborted(err) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if !more {
+			break
+		}
 	}
+
 	if err := a.telegramForm(); err != nil {
 		return err
 	}
