@@ -26,14 +26,17 @@ else
 fi
 [ -n "$NFPM" ] || { echo "error: nfpm not found (PATH, \$GOPATH/bin, .tools)" >&2; exit 1; }
 
-# --- resolve version (same logic as build.sh) --------------------------------
+# --- resolve version (same logic as build.sh: tag -> VERSION file -> dev) ---
 VERSION=""
 if [ -d .git ] && command -v git >/dev/null 2>&1; then
     if tag="$(git describe --exact-match --tags HEAD 2>/dev/null)"; then
         VERSION="${tag#v}"
     fi
 fi
-[ -n "$VERSION" ] || VERSION="$(tr -d '[:space:]' < VERSION)"
+if [ -z "$VERSION" ] && [ -f VERSION ]; then
+    VERSION="$(tr -d '[:space:]' < VERSION)"
+fi
+VERSION="${VERSION:-dev}"
 export VERSION
 
 # --- package -----------------------------------------------------------------

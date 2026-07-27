@@ -281,7 +281,7 @@ make publish    # sync everything to the mirror (needs R2 credentials)
 make clean
 ```
 
-The version is injected via `-ldflags -X github.com/trusted-technologies/nest/internal/buildinfo.Version=...` and resolved as follows: an exact git tag on HEAD wins (semver releases); in CI every other run gets an auto-incrementing `1.0.<run-number>` (each push to `main` publishes a newer package); local builds fall back to the `VERSION` file.
+The version is injected via `-ldflags -X github.com/trusted-technologies/nest/internal/buildinfo.Version=...` and resolved as follows: an exact git tag on HEAD wins (semver releases); in CI every other run gets an auto-incrementing `1.0.<run-number>` (each push to `main` publishes a newer package); local untagged builds fall back to `dev`.
 
 ## Releasing / publishing the mirror
 

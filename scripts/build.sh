@@ -7,8 +7,9 @@
 #   dist/bin/nest-linux-armhf   (GOARCH=arm, GOARM=7)
 #
 # Version: if HEAD is exactly on a git tag, the tag (without leading "v")
-# is used; otherwise the content of the VERSION file. The version is
-# injected into the binary via -ldflags -X .../buildinfo.Version.
+# is used; in CI the workflow writes an auto version (1.0.<run-number>)
+# into ./VERSION before building; local untagged builds fall back to "dev".
+# The version is injected into the binary via -ldflags -X .../buildinfo.Version.
 #
 # Toolchain: `go` from PATH, the $GO env variable, or ./.tools/go/bin/go
 # (in that order). CGO is disabled; binaries are fully static.
@@ -38,10 +39,10 @@ if [ -d .git ] && command -v git >/dev/null 2>&1; then
         VERSION="${tag#v}"
     fi
 fi
-if [ -z "$VERSION" ]; then
+if [ -z "$VERSION" ] && [ -f VERSION ]; then
     VERSION="$(tr -d '[:space:]' < VERSION)"
 fi
-[ -n "$VERSION" ] || { echo "error: could not determine version" >&2; exit 1; }
+VERSION="${VERSION:-dev}"
 echo ">> nest version $VERSION ($go_bin)"
 
 # --- build -------------------------------------------------------------------

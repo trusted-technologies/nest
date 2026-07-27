@@ -57,10 +57,17 @@ mkdir -p "$staging/bin"
 cp dist/bin/nest-linux-* "$staging/bin/"
 cp dist/tools/bin/* "$staging/bin/"
 
-# Version file: CI writes the resolved version to dist/VERSION (auto
-# 1.0.<run-number>); local publishes fall back to the repo VERSION file.
-VERSION_FILE=dist/VERSION
-[ -f "$VERSION_FILE" ] || VERSION_FILE=VERSION
+# Version file: CI writes the resolved version into ./VERSION before the
+# build (auto 1.0.<run-number>, or the tag). Local dev publishes usually
+# have no VERSION file — then /nest/VERSION on the mirror is left as-is,
+# so servers are not offered a dev binary via self-update.
+VERSION_FILE=""
+for f in dist/VERSION VERSION; do
+    [ -f "$f" ] && VERSION_FILE="$f" && break
+done
+if [ -z "$VERSION_FILE" ]; then
+    echo ">> warning: no VERSION file (dev publish) — /nest/VERSION stays unchanged"
+fi
 
 echo ">> syncing /nest/{bin,apt,yum} (with --delete)"
 s3 sync "$staging/bin"  "s3://$R2_BUCKET/nest/bin" --delete \
@@ -87,7 +94,9 @@ s3 sync dist/repo/yum/repodata "s3://$R2_BUCKET/nest/yum/repodata" --delete \
 echo ">> uploading top-level files"
 s3 cp scripts/install.sh "s3://$R2_BUCKET/nest/install.sh" \
     --content-type "text/plain; charset=utf-8" --cache-control "$NOCACHE"
-s3 cp "$VERSION_FILE"    "s3://$R2_BUCKET/nest/VERSION" --cache-control "$NOCACHE"
+if [ -n "$VERSION_FILE" ]; then
+    s3 cp "$VERSION_FILE" "s3://$R2_BUCKET/nest/VERSION" --cache-control "$NOCACHE"
+fi
 
 echo ">> uploading the shared repo signing key to /keys"
 s3 cp dist/repo/keys/trusted-technologies.asc "s3://$R2_BUCKET/keys/trusted-technologies.asc" \
