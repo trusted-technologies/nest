@@ -33,6 +33,10 @@ func Valid(s string) bool {
 
 // Due reports whether a job with the given schedule should run at `now`,
 // given that the scheduler ticks every `window` (systemd timer interval).
+//
+// A job is due when its scheduled activation falls into the half-open
+// interval (now-window, now]: each activation belongs to exactly one tick,
+// so jobs never run twice (or early) for a single scheduled time.
 func Due(s string, now time.Time, window time.Duration) (bool, error) {
 	if s == "" {
 		return true, nil
@@ -41,21 +45,19 @@ func Due(s string, now time.Time, window time.Duration) (bool, error) {
 		var hour, min int
 		fmt.Sscanf(s, "%d:%d", &hour, &min)
 		scheduled := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, now.Location())
+		if now.Before(scheduled) {
+			// The activation may belong to the previous day when the
+			// tick lands just after midnight.
+			scheduled = scheduled.Add(-24 * time.Hour)
+		}
 		diff := now.Sub(scheduled)
-		if diff < 0 {
-			diff = -diff
-		}
-		// wrap-around at midnight
-		if diff > 12*time.Hour {
-			diff = 24*time.Hour - diff
-		}
-		return diff <= window, nil
+		return diff >= 0 && diff < window, nil
 	}
 	sched, err := cronParser.Parse(s)
 	if err != nil {
 		return false, fmt.Errorf("invalid schedule %q (want HH:MM or 5-field cron): %w", s, err)
 	}
-	// due if a cron activation happened within the last `window`
-	prev := sched.Next(now.Add(-window).Add(-time.Second))
+	// due if a cron activation happened within (now-window, now]
+	prev := sched.Next(now.Add(-window))
 	return !prev.After(now), nil
 }
