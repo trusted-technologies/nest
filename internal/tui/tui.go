@@ -127,7 +127,7 @@ func (a *app) telegramForm() error {
 			Description("nest messages you after backup runs.\nCreate a bot with @BotFather to get a token, then send it a message and read the chat ID via getUpdates.").
 			Next(true),
 		huh.NewConfirm().Title("Enabled").Value(&tg.Enabled),
-		huh.NewInput().Title("Bot token").Placeholder("123456:ABC-DEF...").Value(&tg.BotToken),
+		huh.NewInput().Title("Bot token").Placeholder("123456:ABC-DEF...").Password(true).Value(&tg.BotToken),
 		huh.NewInput().Title("Chat ID").Placeholder("-1001234567890").Value(&tg.ChatID),
 		huh.NewInput().Title("Thread ID (optional)").Description("For forum-style group topics.").Value(&tg.ThreadID),
 	)

@@ -26,19 +26,20 @@ rm -rf "$repo"
 mkdir -p "$repo"
 cp dist/packages/*.rpm "$repo/"
 
-# Sign the packages themselves when rpmsign is available (rpm --checksig /
-# gpgcheck=1 verify these signatures at install time).
-if command -v rpmsign >/dev/null 2>&1; then
-    echo ">> signing rpms with key $NEST_GPG_KEY"
-    # Some rpm builds resolve %__gpg to a bare "gpg" and exec it without a
-    # PATH lookup — always pass the absolute path.
-    rpmsign --addsign \
-        -D "__gpg $(command -v gpg)" \
-        -D "_gpg_name $NEST_GPG_KEY" \
-        "$repo"/*.rpm
-else
-    echo ">> rpmsign not found, skipping package signatures (repomd.xml is still signed)"
+# The packages themselves must be signed too: clients run with gpgcheck=1,
+# and publishing unsigned RPMs would either break installations or tempt
+# admins into disabling signature checks. Never skip silently.
+if ! command -v rpmsign >/dev/null 2>&1; then
+    echo "error: rpmsign not found (Debian/Ubuntu: apt-get install rpm) — refusing to publish unsigned RPMs" >&2
+    exit 1
 fi
+echo ">> signing rpms with key $NEST_GPG_KEY"
+# Some rpm builds resolve %__gpg to a bare "gpg" and exec it without a
+# PATH lookup — always pass the absolute path.
+rpmsign --addsign \
+    -D "__gpg $(command -v gpg)" \
+    -D "_gpg_name $NEST_GPG_KEY" \
+    "$repo"/*.rpm
 
 echo ">> createrepo_c"
 createrepo_c "$repo"

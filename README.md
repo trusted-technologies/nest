@@ -37,11 +37,19 @@ Other distributions can use the standalone binaries from the mirror (see *Manual
 ## Quick start
 
 ```bash
-curl -fsSL https://mirror.trust-me.host/nest/install.sh | sudo bash
+curl --proto '=https' --proto-redir '=https' -fsSL https://mirror.trust-me.host/nest/install.sh | sudo bash
 sudo nest setup
 ```
 
 The installer detects your distribution, adds the nest package repository (apt, dnf/yum or zypper) and installs the package. `nest setup` then opens the interactive TUI to configure remotes and backup jobs.
+
+The packages and repositories are signed with the **Trusted Technologies Repo** OpenPGP key:
+
+```
+53D1 58C2 C57D 928D F0F5 990C 1AF8 5015 7FCE 9AD2
+```
+
+`install.sh` verifies this fingerprint before trusting the key — you can cross-check it against the copy of this README on GitHub (an independent channel from the mirror).
 
 To enable scheduled backups after setup:
 
@@ -54,8 +62,10 @@ sudo systemctl enable --now nest.timer
 ### Debian / Ubuntu (apt)
 
 ```bash
-curl -fsSL https://mirror.trust-me.host/keys/trusted-technologies.asc \
-  | sudo gpg --dearmor -o /usr/share/keyrings/nest-archive-keyring.gpg
+curl -fsSL https://mirror.trust-me.host/keys/trusted-technologies.asc -o /tmp/nest-key.asc
+# verify the fingerprint before trusting the key (see above)
+gpg --batch --with-colons --with-fingerprint /tmp/nest-key.asc | awk -F: '/^fpr:/ {print $10; exit}'
+sudo gpg --dearmor -o /usr/share/keyrings/nest-archive-keyring.gpg /tmp/nest-key.asc
 echo "deb [signed-by=/usr/share/keyrings/nest-archive-keyring.gpg] https://mirror.trust-me.host/nest/apt stable main" \
   | sudo tee /etc/apt/sources.list.d/nest.list
 sudo apt-get update
@@ -73,7 +83,9 @@ enabled=1
 gpgcheck=1
 gpgkey=https://mirror.trust-me.host/keys/trusted-technologies.asc
 EOF
-sudo rpm --import https://mirror.trust-me.host/keys/trusted-technologies.asc
+curl -fsSL https://mirror.trust-me.host/keys/trusted-technologies.asc -o /tmp/nest-key.asc
+# verify the fingerprint (see above), then:
+sudo rpm --import /tmp/nest-key.asc
 sudo dnf install nest        # or: yum install nest
 ```
 
@@ -90,11 +102,13 @@ sudo zypper install nest
 ```bash
 # amd64 — use arm64 or armhf on ARM machines
 curl -fsSLO https://mirror.trust-me.host/nest/bin/nest-linux-amd64
+curl -fsSLO https://mirror.trust-me.host/nest/bin/sha256sums.txt
+grep ' nest-linux-amd64$' sha256sums.txt | sha256sum -c -
 sudo install -m 0755 nest-linux-amd64 /usr/bin/nest
 sudo nest setup
 ```
 
-Checksums for every binary are published at `https://mirror.trust-me.host/nest/bin/sha256sums.txt`.
+Checksums in `sha256sums.txt` are additionally detached-signed with the repository key (`sha256sums.txt.asc`); nest verifies that signature automatically whenever it downloads or updates a binary itself.
 
 ## Usage
 
@@ -151,8 +165,10 @@ nest snapshots --job pterodactyl-volumes
 nest restore --job pterodactyl-volumes --snapshot latest --target /srv/restore
 
 # restore a single path out of a snapshot
-nest restore --job mysql --snapshot latest --path dumps/mydb.sql --target /tmp/mysql-restore
+nest restore --job mysql --snapshot latest --path dumps/mydb.sql --target /var/lib/nest/restore
 ```
+
+The default `--target` is `/var/lib/nest/restore` (created with mode 0700 — restored database dumps must not be world-readable).
 
 ### Telegram notifications
 
@@ -263,7 +279,7 @@ Paths used by nest:
 
 - **restic backend** (`incremental: true`) — snapshots are deduplicated, compressed and encrypted inside a restic repository on the remote. Supports per-snapshot restore, partial (`--path`) restore, retention policies and `nest repair`.
 - **archive backend** (`incremental: false`) — every run uploads a full `.tar.gz` archive. Simple and portable, but no deduplication or partial restore.
-- **Helper binaries** — nest does not bundle restic/rclone. On first use it downloads the right build for your architecture from the mirror (`https://mirror.trust-me.host/nest/bin/`, checksums in `sha256sums.txt`) into `/var/lib/nest/`. No internet access to the mirror? Install the `restic`/`rclone` distro packages instead (recommended by the deb package).
+- **Helper binaries** — nest does not bundle restic/rclone. On first use it downloads the right build for your architecture from the mirror (`https://mirror.trust-me.host/nest/bin/`) into `/var/lib/nest/`. Every downloaded binary is verified against `sha256sums.txt` detached-signed with the repository OpenPGP key (the public key is embedded in the nest binary); verification is fail-closed. No internet access to the mirror? Install the `restic`/`rclone` distro packages instead (recommended by the deb package).
 - **Scheduling** — `nest.timer` triggers `nest.service` every 5 minutes, which runs `nest backup --scheduled`; each job whose schedule matches the current 5-minute window is executed.
 
 ## Building from source
@@ -292,12 +308,15 @@ The public mirror (Cloudflare R2, `https://mirror.trust-me.host`) is shared betw
 ```
 /nest/install.sh              one-liner installer
 /nest/VERSION                 latest released version
-/nest/bin/                    nest/restic/rclone binaries + sha256sums.txt
+/nest/bin/                    nest/restic/rclone binaries + signed sha256sums.txt(.asc)
 /nest/apt/                    Debian/Ubuntu repository (signed: InRelease)
 /nest/yum/                    RPM repository (signed: repomd.xml.asc)
 /keys/trusted-technologies.asc   repository GPG public key (ascii-armored)
 /keys/trusted-technologies.gpg   same key, pre-dearmored for minimal systems
 ```
+
+`/keys` is shared by all projects on the mirror, so project pipelines never
+write to it — the key is uploaded there once by a separate, manual process.
 
 To publish by hand:
 
@@ -318,10 +337,13 @@ CI secrets: `GPG_PRIVATE_KEY` (armored private key), `R2_ENDPOINT`, `R2_BUCKET`,
 
 ## Security notes
 
-- `/etc/nest/config.yml` contains credentials and the restic encryption password; nest always writes it with mode **0600**. Back it up securely — without `encryption_password` your restic snapshots are unrecoverable.
+- `/etc/nest/config.yml` contains credentials and the restic encryption password; nest always writes it with mode **0600** and tightens the mode on load if it was loosened by hand. Back it up securely — without `encryption_password` your restic snapshots are unrecoverable.
 - SFTP remotes use **SSH key authentication only**; nest generates a dedicated keypair in `/etc/nest/ssh/` (mode 0700).
-- The apt and yum repositories are GPG-signed and clients verify signatures (`signed-by` / `gpgcheck=1`); all traffic to the mirror is over HTTPS.
-- The systemd service runs backups with low priority (`Nice=10`, idle-IO class) to avoid interfering with production workloads.
+- The apt and yum repositories are GPG-signed and clients verify signatures (`signed-by` / `gpgcheck=1`); all traffic to the mirror is over HTTPS (redirect downgrades and cross-host redirects are refused).
+- `install.sh` pins the repository key **by fingerprint** (`53D158C2C57D928DF0F5990C1AF850157FCE9AD2`, also shown above) — a mirror alone cannot swap in a different key.
+- Every binary nest downloads (helpers, self-update) is verified against the **GPG-signed** `sha256sums.txt`, fail-closed; self-update also refuses downgrades.
+- Database passwords travel via environment variables (`MYSQL_PWD` / `PGPASSWORD`), never via command-line arguments; error messages and notifications redact command lines.
+- The systemd service runs backups with low priority (`Nice=10`, idle-IO class) and sandboxing (`ProtectSystem=full`, `NoNewPrivileges=true`, …) to avoid interfering with production workloads.
 
 ## Contributing
 

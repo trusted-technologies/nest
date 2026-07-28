@@ -9,3 +9,28 @@ ExecStart=/usr/bin/nest backup --scheduled
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+
+# --- hardening ----------------------------------------------------------------
+# The daemon runs as root (it must read arbitrary files and reach the
+# network) and executes helper binaries — restrict everything it does not
+# need. Deliberately NOT set:
+#   PrivateTmp          — MySQL/MariaDB may use a socket under /tmp
+#   ProtectHome         — backups read /home; rclone OAuth writes /root/.config
+#   CapabilityBoundingSet — restic/rclone/ssh needs vary across setups
+WorkingDirectory=/var/lib/nest
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=full
+# restic's ssh (sftp remotes) appends to known_hosts under /etc/nest/ssh.
+ReadWritePaths=/etc/nest/ssh
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

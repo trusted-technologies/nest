@@ -16,10 +16,39 @@ set -euo pipefail
 BASE="${NEST_MIRROR_BASE:-https://mirror.trust-me.host/nest}"
 KEYS_BASE="${NEST_KEYS_BASE:-https://mirror.trust-me.host/keys}"
 KEY_ASC="$KEYS_BASE/trusted-technologies.asc"
-KEY_GPG="$KEYS_BASE/trusted-technologies.gpg"
 
 log() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# The repository signing key is pinned by fingerprint: the key, this script
+# and the packages all come from the same mirror, so without an out-of-band
+# fingerprint a partial mirror compromise could swap in an attacker's key.
+# Cross-check: https://github.com/trusted-technologies/nest (README).
+# NEST_KEY_FPR overrides the pin (used by the e2e tests with a throwaway key).
+EXPECTED_KEY_FPR="${NEST_KEY_FPR:-53D158C2C57D928DF0F5990C1AF850157FCE9AD2}"
+
+# fetch <url> — curl restricted to HTTPS (and HTTPS redirects) when the URL
+# is HTTPS; plain HTTP stays allowed for local/test mirrors.
+fetch() {
+    case "$1" in
+        https://*) curl --proto '=https' --proto-redir '=https' -fsSL "$1" ;;
+        *)         curl -fsSL "$1" ;;
+    esac
+}
+
+# verify_key <armored-key-file> — abort unless the fingerprint matches.
+# Uses --with-fingerprint (no import, no side effects): it works on both
+# gpg 1.4 (Ubuntu 16.04) and 2.x, unlike `--import-options show-only`.
+verify_key() {
+    command -v gpg >/dev/null 2>&1 || die "gpg is required to verify the repository key"
+    local fpr
+    fpr="$(gpg --batch --with-colons --with-fingerprint "$1" 2>/dev/null \
+        | awk -F: '/^fpr:/ { print $10; exit }')"
+    [ -n "$fpr" ] || die "cannot read the repository key"
+    [ "$fpr" = "$EXPECTED_KEY_FPR" ] \
+        || die "repository key fingerprint mismatch (got: $fpr, want: $EXPECTED_KEY_FPR) — refusing to continue"
+    log "repository key fingerprint verified: $fpr"
+}
 
 [ "$(id -u)" -eq 0 ] || die "must run as root — try: curl -fsSL $BASE/install.sh | sudo bash"
 
@@ -73,9 +102,10 @@ fi
 # --- install -------------------------------------------------------------------
 case "$family" in
     debian)
-        # curl fetches the key; ca-certificates only for https mirrors.
+        # curl fetches the key; gpg verifies it; ca-certificates for https mirrors.
         need=""
         command -v curl >/dev/null 2>&1 || need="$need curl"
+        command -v gpg >/dev/null 2>&1 || need="$need gnupg"
         case "$BASE" in
             https://*)
                 [ -e /etc/ssl/certs/ca-certificates.crt ] || need="$need ca-certificates" ;;
@@ -86,15 +116,13 @@ case "$family" in
             DEBIAN_FRONTEND=noninteractive apt-get install -y $need
         fi
 
+        key_tmp="$(mktemp)"
+        trap 'rm -f "$key_tmp"' EXIT
+        fetch "$KEY_ASC" > "$key_tmp"
+        verify_key "$key_tmp"
+
         install -d -m 0755 /usr/share/keyrings
-        if command -v gpg >/dev/null 2>&1; then
-            curl -fsSL "$KEY_ASC" \
-                | gpg --dearmor > /usr/share/keyrings/nest-archive-keyring.gpg.tmp
-        else
-            # No gpg on the system: fetch the pre-dearmored keyring.
-            curl -fsSL "$KEY_GPG" \
-                > /usr/share/keyrings/nest-archive-keyring.gpg.tmp
-        fi
+        gpg --dearmor < "$key_tmp" > /usr/share/keyrings/nest-archive-keyring.gpg.tmp
         mv /usr/share/keyrings/nest-archive-keyring.gpg.tmp \
            /usr/share/keyrings/nest-archive-keyring.gpg
         chmod 0644 /usr/share/keyrings/nest-archive-keyring.gpg
@@ -111,6 +139,14 @@ case "$family" in
         ;;
 
     rhel)
+        command -v gpg >/dev/null 2>&1 || {
+            if command -v dnf >/dev/null 2>&1; then dnf install -y gnupg2; else yum install -y gnupg2; fi
+        }
+        key_tmp="$(mktemp)"
+        trap 'rm -f "$key_tmp"' EXIT
+        fetch "$KEY_ASC" > "$key_tmp"
+        verify_key "$key_tmp"
+
         cat > /etc/yum.repos.d/nest.repo <<EOF
 [nest]
 name=nest repository
@@ -119,7 +155,7 @@ enabled=1
 gpgcheck=1
 gpgkey=$KEY_ASC
 EOF
-        rpm --import "$KEY_ASC"
+        rpm --import "$key_tmp"
         if command -v dnf >/dev/null 2>&1; then
             dnf install -y nest
         else
@@ -128,9 +164,15 @@ EOF
         ;;
 
     suse)
+        command -v gpg >/dev/null 2>&1 || zypper --non-interactive install -y gpg2
+        key_tmp="$(mktemp)"
+        trap 'rm -f "$key_tmp"' EXIT
+        fetch "$KEY_ASC" > "$key_tmp"
+        verify_key "$key_tmp"
+
         # Import the key into the rpm keyring first: zypper verifies the
         # signed repomd.xml against it.
-        rpm --import "$KEY_ASC"
+        rpm --import "$key_tmp"
         zypper --non-interactive ar -f -g "$BASE/yum" nest
         zypper --non-interactive --gpg-auto-import-keys refresh
         zypper --non-interactive install -y nest
@@ -152,6 +194,12 @@ EOF
         exit 1
         ;;
 esac
+
+# Sanity check: the installed binary must actually be nest. Guards against
+# name collisions (e.g. Fedora ships an unrelated "nest" package in its own
+# repositories) and silent partial installs.
+nest version >/dev/null 2>&1 \
+    || die "installation finished but 'nest version' failed — the package may have resolved to a different product"
 
 log ""
 log "nest installed successfully."

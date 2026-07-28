@@ -2,8 +2,8 @@ name: release
 
 # Release flow (see also the "Releasing" section in README.md):
 #   build static binaries -> nfpm packages -> fetch restic/rclone helpers ->
-#   build & GPG-sign apt/yum repos -> sync everything to the R2 mirror ->
-#   attach packages to the GitHub release.
+#   build & GPG-sign apt/yum repos + sign sha256sums.txt ->
+#   sync everything to the R2 mirror -> attach packages to the GitHub release.
 #
 # Required secrets:
 #   GPG_PRIVATE_KEY       ascii-armored private key for repo signing
@@ -20,15 +20,33 @@ on:
       - "v*"
   workflow_dispatch:
 
+# The GITHUB_TOKEN is only needed by the Create-GitHub-release step (tag
+# builds). checkout uses persist-credentials: false so scripts and tools
+# running in this job never see the token.
 permissions:
   contents: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Publishes to the production mirror. Add required reviewers to the
+    # "production" environment in the repo settings to turn publishing into
+    # an approval-gated step.
+    environment: production
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Publishing must only ever happen from main or a tag: workflow_dispatch
+      # can be started from any branch (with modified scripts), so guard it.
+      - name: Guard ref
+        run: |
+          case "${{ github.ref }}" in
+            refs/heads/main|refs/tags/*) ;;
+            *) echo "refusing to publish from ${{ github.ref }}" >&2; exit 1 ;;
+          esac
 
       # Versioning: tag pushes keep their semver (build.sh prefers the exact
       # tag); every other run gets an auto-incrementing 1.0.<run-number>, so
@@ -43,23 +61,18 @@ jobs:
           fi
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
 
+      # nfpm is pinned: an unpinned @latest tool would run its code next to
+      # the GPG signing key and R2 credentials on every release.
       - name: Install packaging tools
         run: |
           command -v aws || { echo "error: aws CLI missing on runner" >&2; exit 1; }
           sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm bzip2 unzip
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-
-      - name: Import GPG signing key
-        run: |
-          printf '%s' "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-          fpr="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ { print $10; exit }')"
-          test -n "$fpr" || { echo "no secret key imported" >&2; exit 1; }
-          echo "NEST_GPG_KEY=$fpr" >> "$GITHUB_ENV"
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
 
       - name: Build binaries
         run: ./scripts/build.sh
@@ -67,6 +80,19 @@ jobs:
       - name: Build packages (deb/rpm)
         run: ./scripts/package.sh
 
+      # The GPG key is imported as late as possible — only the steps below
+      # (helper checksums + repo metadata) sign anything.
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          fpr="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ { print $10; exit }')"
+          test -n "$fpr" || { echo "no secret key imported" >&2; exit 1; }
+          echo "NEST_GPG_KEY=$fpr" >> "$GITHUB_ENV"
+
+      # Verifies upstream checksums and signs sha256sums.txt (clients verify
+      # the signature before running any downloaded binary).
       - name: Fetch helper tools (restic, rclone)
         run: ./scripts/fetch-tools.sh
 
@@ -86,6 +112,6 @@ jobs:
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/packages/*

@@ -7,8 +7,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -134,11 +136,19 @@ type Telegram struct {
 	ThreadID string `yaml:"thread_id,omitempty"`
 }
 
-// Load reads and parses the configuration file.
+// Load reads and parses the configuration file. The file holds secrets, so
+// an overly permissive mode (e.g. created by hand with a default umask) is
+// tightened to 0600 on a best-effort basis.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
+	}
+	if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
+		log.Printf("warning: %s has mode %04o, tightening to 0600 (it contains secrets)", path, fi.Mode().Perm())
+		if err := os.Chmod(path, 0o600); err != nil {
+			log.Printf("warning: cannot chmod %s: %v", path, err)
+		}
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -169,11 +179,24 @@ func Save(path string, cfg *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op after a successful rename
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // FindRemote returns the remote with the given name, or nil.
@@ -237,6 +260,11 @@ func (c *Config) Validate() []string {
 		case RemoteSFTP:
 			if r.Host == "" || r.User == "" {
 				errs = append(errs, fmt.Sprintf("remote %q: host and user are required", r.Name))
+			}
+			// key_file is embedded into restic's -o sftp.args, which ssh
+			// word-splits — whitespace would become extra ssh options.
+			if strings.ContainsAny(r.KeyFile, " \t\n") {
+				errs = append(errs, fmt.Sprintf("remote %q: key_file must not contain whitespace", r.Name))
 			}
 		case RemoteRclone:
 			if r.RcloneRemote == "" {

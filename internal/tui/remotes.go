@@ -249,7 +249,7 @@ func (a *app) remoteForm(r *config.Remote, origName string) error {
 			huh.NewInput().Title("Endpoint").Placeholder("s3.eu-central-1.amazonaws.com").Value(&r.Endpoint).Validate(validateRequired),
 			huh.NewInput().Title("Region (optional)").Placeholder("eu-central-1").Value(&r.Region),
 			huh.NewInput().Title("Bucket").Value(&r.Bucket).Validate(validateRequired),
-			huh.NewInput().Title("Access key").Value(&r.AccessKey).Validate(validateRequired),
+			huh.NewInput().Title("Access key").Password(true).Value(&r.AccessKey).Validate(validateRequired),
 			huh.NewInput().Title("Secret key").Password(true).Value(&r.SecretKey).Validate(validateRequired),
 		)
 	case config.RemoteSFTP:

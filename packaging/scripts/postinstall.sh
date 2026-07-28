@@ -4,7 +4,7 @@ set -e
 
 # State, cache, config and SSH-key directories.
 mkdir -p /etc/nest /var/lib/nest/bin /var/cache/nest /etc/nest/ssh
-chmod 700 /etc/nest/ssh
+chmod 700 /etc/nest/ssh /var/cache/nest
 
 # Register the new unit files with systemd (if systemd is running).
 if [ -d /run/systemd/system ]; then

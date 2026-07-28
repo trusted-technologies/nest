@@ -84,6 +84,9 @@ jobs:
       daily: 7
     db_host: localhost
     db_port: 3306
+    # Prefer a dedicated read-only backup user over root, e.g.:
+    #   CREATE USER 'backup'@'localhost' IDENTIFIED BY '...';
+    #   GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER, RELOAD ON *.* TO 'backup'@'localhost';
     db_user: root
     db_password: "secret"
     databases: []                     # empty = all databases

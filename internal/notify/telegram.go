@@ -4,6 +4,7 @@
 package notify
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -70,6 +71,12 @@ func (n *Notifier) send(text string) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.PostForm(u, form)
 	if err != nil {
+		// The token is part of the request URL; *url.Error messages embed
+		// that URL, so log only the wrapped transport error.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		log.Printf("warning: telegram notification failed: %v", err)
 		return
 	}

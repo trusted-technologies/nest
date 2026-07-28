@@ -2,6 +2,7 @@ package engine
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,23 +62,58 @@ func TestDBDefaults(t *testing.T) {
 
 func TestMysqlArgs(t *testing.T) {
 	// localhost: unix socket, no -h/-P (same as `sudo mysql`)
-	got := mysqlArgs(&config.Job{Type: config.JobMySQL})
-	if want := []string{"-u", "root"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("localhost: got %v, want %v", got, want)
+	args, env := mysqlArgs(&config.Job{Type: config.JobMySQL})
+	if want := []string{"-u", "root"}; !reflect.DeepEqual(args, want) {
+		t.Errorf("localhost: got %v, want %v", args, want)
 	}
-	// localhost + password: socket + -p
-	got = mysqlArgs(&config.Job{Type: config.JobMySQL, DBPassword: "pw"})
-	if want := []string{"-u", "root", "-ppw"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("localhost+pw: got %v, want %v", got, want)
+	if len(env) != 0 {
+		t.Errorf("localhost without password: unexpected env %v", env)
+	}
+	// localhost + password: socket, password travels via MYSQL_PWD — never argv
+	args, env = mysqlArgs(&config.Job{Type: config.JobMySQL, DBPassword: "pw"})
+	if want := []string{"-u", "root"}; !reflect.DeepEqual(args, want) {
+		t.Errorf("localhost+pw: got %v, want %v", args, want)
+	}
+	if env["MYSQL_PWD"] != "pw" {
+		t.Errorf("localhost+pw: MYSQL_PWD env missing, got %v", env)
+	}
+	for _, a := range args {
+		if strings.Contains(a, "pw") {
+			t.Errorf("password must not appear in argv: %v", args)
+		}
 	}
 	// remote host: TCP with -h/-P
-	got = mysqlArgs(&config.Job{Type: config.JobMySQL, DBHost: "db.example", DBUser: "backup"})
-	if want := []string{"-h", "db.example", "-P", "3306", "-u", "backup"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("remote: got %v, want %v", got, want)
+	args, _ = mysqlArgs(&config.Job{Type: config.JobMySQL, DBHost: "db.example", DBUser: "backup"})
+	if want := []string{"-h", "db.example", "-P", "3306", "-u", "backup"}; !reflect.DeepEqual(args, want) {
+		t.Errorf("remote: got %v, want %v", args, want)
 	}
 	// explicit 127.0.0.1: TCP
-	got = mysqlArgs(&config.Job{Type: config.JobMySQL, DBHost: "127.0.0.1"})
-	if want := []string{"-h", "127.0.0.1", "-P", "3306", "-u", "root"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("127.0.0.1: got %v, want %v", got, want)
+	args, _ = mysqlArgs(&config.Job{Type: config.JobMySQL, DBHost: "127.0.0.1"})
+	if want := []string{"-h", "127.0.0.1", "-P", "3306", "-u", "root"}; !reflect.DeepEqual(args, want) {
+		t.Errorf("127.0.0.1: got %v, want %v", args, want)
+	}
+}
+
+func TestValidDBName(t *testing.T) {
+	for _, ok := range []string{"app", "wordpress2", "my-db", "db.name", "s22748_StarLand", "база"} {
+		if err := validDBName(ok); err != nil {
+			t.Errorf("%q should be accepted: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{
+		"", "--file=/root/x", "-f/etc/shadow", "--result-file=vmlinuz",
+		"../../etc/cron.d/pwn", "a/b", `a\b`, "line\nbreak", "tab\there", "del\x7f",
+	} {
+		if err := validDBName(bad); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
+	}
+}
+
+func TestRedactArgs(t *testing.T) {
+	got := redactArgs([]string{"-u", "root", "-pSup3rSecret", "-N", "-p"})
+	want := []string{"-u", "root", "-p***", "-N", "-p"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }

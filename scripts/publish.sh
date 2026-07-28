@@ -2,8 +2,10 @@
 # publish.sh — upload the release artifacts to the Cloudflare R2 mirror
 # (public base https://mirror.trust-me.host).
 #
-# The mirror is shared between projects; nest lives under the /nest prefix
-# and the repository signing key (shared by all projects) under /keys:
+# The mirror is shared between projects; nest lives under the /nest prefix.
+# The shared repository signing key under /keys is NOT uploaded here —
+# writing to a cross-project prefix must require a separate, tightly
+# guarded process (see mirror.md), so this script never leaves /nest:
 #
 #   scripts/install.sh                    -> /nest/install.sh
 #   dist/VERSION                          -> /nest/VERSION
@@ -11,7 +13,6 @@
 #   dist/tools/bin/*                      -> /nest/bin/    } synced with --delete
 #   dist/repo/apt                         -> /nest/apt/    }
 #   dist/repo/yum                         -> /nest/yum/   /
-#   dist/repo/keys/trusted-technologies.* -> /keys/       (copied, never deleted)
 #
 # --delete is used ONLY under /nest/{bin,apt,yum}, so stale artifacts are
 # removed there. Everything else in the bucket (other projects, /keys) is
@@ -71,12 +72,20 @@ fi
 
 echo ">> syncing /nest/{bin,apt,yum} (with --delete)"
 s3 sync "$staging/bin"  "s3://$R2_BUCKET/nest/bin" --delete \
-    --exclude "restic-*" --exclude "rclone-*" --exclude "sha256sums.txt" \
+    --exclude "restic-*" --exclude "rclone-*" --exclude "sha256sums.txt*" \
     --cache-control "$NOCACHE"
 s3 sync "$staging/bin"  "s3://$R2_BUCKET/nest/bin" \
     --exclude "*" --include "restic-*" --include "rclone-*" \
     --cache-control "$LONGCACHE"
+# The checksum manifest and its signature: clients verify fail-closed, so
+# both must always be present and fresh. Refuse to publish unsigned sums.
+[ -f "$staging/bin/sha256sums.txt.asc" ] || {
+    echo "error: sha256sums.txt.asc missing — rebuild tools with NEST_GPG_KEY set" >&2
+    exit 1
+}
 s3 cp "$staging/bin/sha256sums.txt" "s3://$R2_BUCKET/nest/bin/sha256sums.txt" \
+    --cache-control "$NOCACHE"
+s3 cp "$staging/bin/sha256sums.txt.asc" "s3://$R2_BUCKET/nest/bin/sha256sums.txt.asc" \
     --cache-control "$NOCACHE"
 
 # apt: pool (immutable .deb) long cache, dists (indices) no-cache
@@ -98,17 +107,10 @@ if [ -n "$VERSION_FILE" ]; then
     s3 cp "$VERSION_FILE" "s3://$R2_BUCKET/nest/VERSION" --cache-control "$NOCACHE"
 fi
 
-echo ">> uploading the shared repo signing key to /keys"
-s3 cp dist/repo/keys/trusted-technologies.asc "s3://$R2_BUCKET/keys/trusted-technologies.asc" \
-    --content-type "text/plain; charset=utf-8" --cache-control "$LONGCACHE"
-s3 cp dist/repo/keys/trusted-technologies.gpg "s3://$R2_BUCKET/keys/trusted-technologies.gpg" \
-    --cache-control "$LONGCACHE"
-
 echo ""
 echo "Published:"
 echo "  $BASE/install.sh"
 echo "  $BASE/VERSION"
-echo "  $BASE/bin/   (nest, restic, rclone binaries + sha256sums.txt)"
+echo "  $BASE/bin/   (nest, restic, rclone binaries + signed sha256sums.txt)"
 echo "  $BASE/apt/   (Debian/Ubuntu repository)"
 echo "  $BASE/yum/   (RPM repository)"
-echo "  ${BASE%/nest}/keys/trusted-technologies.{asc,gpg}   (shared repo key)"

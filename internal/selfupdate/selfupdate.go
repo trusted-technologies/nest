@@ -1,22 +1,24 @@
 // Package selfupdate replaces the running nest binary with the latest
 // release from the distribution mirror.
+//
+// The downloaded binary is verified against sha256sums.txt detached-signed
+// by the repository OpenPGP key (the public key is embedded in the binary),
+// and downgrades are refused: a mirror that serves an older (or replayed)
+// VERSION must never move an installation backwards.
 package selfupdate
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
-	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/trusted-technologies/nest/internal/buildinfo"
+	"github.com/trusted-technologies/nest/internal/mirror"
 )
 
 // Run checks the mirror for a newer nest release and, if one exists,
@@ -27,9 +29,9 @@ func Run(ctx context.Context) error {
 		fmt.Printf("development build (version %q) — self-update disabled\n", buildinfo.Version)
 		return nil
 	}
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := mirror.SecureClient(5 * time.Minute)
 
-	latest, err := fetchText(ctx, client, buildinfo.MirrorBaseURL+"/VERSION")
+	latest, err := mirror.FetchText(ctx, client, buildinfo.MirrorBaseURL+"/VERSION")
 	if err != nil {
 		return fmt.Errorf("fetch %s/VERSION: %w", buildinfo.MirrorBaseURL, err)
 	}
@@ -37,9 +39,14 @@ func Run(ctx context.Context) error {
 	if latest == "" {
 		return fmt.Errorf("mirror %s/VERSION returned an empty version", buildinfo.MirrorBaseURL)
 	}
-	if latest == current {
+	switch cmp, verr := CompareVersions(latest, current); {
+	case verr != nil:
+		return fmt.Errorf("cannot compare versions (local %q, mirror %q): %w", current, latest, verr)
+	case cmp == 0:
 		fmt.Printf("nest %s is already up to date\n", current)
 		return nil
+	case cmp < 0:
+		return fmt.Errorf("refusing to downgrade: mirror offers %s, installed is %s", latest, current)
 	}
 	fmt.Printf("updating nest %s -> %s\n", current, latest)
 
@@ -54,11 +61,11 @@ func Run(ctx context.Context) error {
 	name := "nest-linux-" + buildinfo.ArchSuffix(runtime.GOARCH)
 	url := buildinfo.MirrorBaseURL + "/bin/" + name
 	tmp := exe + ".new"
-	if err := downloadFile(ctx, client, url, tmp); err != nil {
+	if err := mirror.DownloadBinary(ctx, client, url, tmp); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("download %s: %w", url, err)
 	}
-	if err := verify(ctx, client, tmp, name); err != nil {
+	if err := mirror.VerifySignedSum(ctx, client, tmp, name); err != nil {
 		os.Remove(tmp)
 		return err
 	}
@@ -74,84 +81,52 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-// fetchText GETs url and returns the trimmed body.
-func fetchText(ctx context.Context, client *http.Client, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// CompareVersions compares two dotted-numeric versions ("1.0.4" vs
+// "1.0.10"), returning -1, 0 or +1. Trailing pre-release/build suffixes
+// ("-rc1", "+build") are stripped; a leading "v" is tolerated.
+func CompareVersions(a, b string) (int, error) {
+	pa, err := parseVersion(a)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	resp, err := client.Do(req)
+	pb, err := parseVersion(b)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status %s", resp.Status)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
-}
-
-// downloadFile downloads url to path.
-func downloadFile(ctx context.Context, client *http.Client, url, path string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status %s", resp.Status)
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(f, resp.Body)
-	cerr := f.Close()
-	if err != nil {
-		return err
-	}
-	return cerr
-}
-
-// verify checks the sha256 of path against the mirror's sha256sums.txt.
-// An unreachable sums file or a missing entry is a warning, not an error.
-func verify(ctx context.Context, client *http.Client, path, fileName string) error {
-	sumsURL := buildinfo.MirrorBaseURL + "/bin/sha256sums.txt"
-	sums, err := fetchText(ctx, client, sumsURL)
-	if err != nil {
-		log.Printf("warning: cannot fetch %s: %v (skipping checksum verification)", sumsURL, err)
-		return nil
-	}
-	var want string
-	for _, line := range strings.Split(sums, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == fileName {
-			want = fields[0]
-			break
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var x, y int
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		if x < y {
+			return -1, nil
+		}
+		if x > y {
+			return 1, nil
 		}
 	}
-	if want == "" {
-		return nil
+	return 0, nil
+}
+
+// parseVersion splits a version string into its numeric components.
+func parseVersion(v string) ([]int, error) {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return err
+	if v == "" {
+		return nil, fmt.Errorf("empty version")
 	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("hash %s: %w", path, err)
+	var out []int
+	for _, part := range strings.Split(v, ".") {
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("invalid version component %q in %q", part, v)
+		}
+		out = append(out, n)
 	}
-	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, want) {
-		return fmt.Errorf("sha256 mismatch for %s: got %s, want %s", fileName, got, want)
-	}
-	return nil
+	return out, nil
 }

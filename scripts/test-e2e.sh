@@ -43,14 +43,21 @@ docker network create "$NET" >/dev/null
 
 # --- stage 1+2: build repos, stage and serve the mirror -----------------------
 echo "== building repositories and starting local mirror =="
+# The repo is mounted READ-ONLY; the container works on a private copy, so
+# test artifacts (throwaway key material, staged mirror, root-owned files)
+# never land in the host working tree.
 docker run -d "${DNS[@]}" --name "$MIRROR_CTR" --network "$NET" --network-alias mirror \
-    -v "$PWD:/nest" -w /nest debian:12 sleep infinity >/dev/null
+    -v "$PWD:/nest-ro:ro" debian:12 sleep infinity >/dev/null
 
 docker exec "$MIRROR_CTR" bash -c '
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     apt-get install -y -qq dpkg-dev apt-utils createrepo-c rpm gnupg python3 >/dev/null
+
+    mkdir /work
+    tar -C /nest-ro --exclude=./.git --exclude=./.tools -cf - . | tar -C /work -xf -
+    cd /work
 
     export GNUPGHOME=/tmp/gnupg
     mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
@@ -63,15 +70,18 @@ docker exec "$MIRROR_CTR" bash -c '
 
     m=dist/mirror
     rm -rf "$m" && mkdir -p "$m/nest/bin" "$m/keys"
-    cp scripts/install.sh VERSION "$m/nest/"
+    cp scripts/install.sh "$m/nest/"
+    if [ -f VERSION ]; then cp VERSION "$m/nest/"; else echo "0.0.0-e2e" > "$m/nest/VERSION"; fi
     cp -r dist/repo/apt dist/repo/yum "$m/nest/"
     cp dist/bin/* "$m/nest/bin/"
-    (cd "$m/nest/bin" && sha256sum * > sha256sums.txt)
+    (cd "$m/nest/bin" && sha256sum nest-linux-* > sha256sums.txt)
+    gpg --batch --yes --armor --local-user "$NEST_GPG_KEY" \
+        --detach-sign --output "$m/nest/bin/sha256sums.txt.asc" "$m/nest/bin/sha256sums.txt"
     cp dist/repo/keys/trusted-technologies.* "$m/keys/"
-    rm -f trusted-technologies.asc  # test key artifact, not for the repo root
+    printf %s "$fpr" > "$m/nest/key.fpr"
 '
 
-docker exec -d "$MIRROR_CTR" python3 -m http.server "$PORT" --directory /nest/dist/mirror
+docker exec -d "$MIRROR_CTR" python3 -m http.server "$PORT" --directory /work/dist/mirror
 
 # wait for the server
 for i in $(seq 1 30); do
@@ -102,7 +112,7 @@ if command -v apt-get >/dev/null 2>&1; then
 elif command -v zypper >/dev/null 2>&1; then
     zypper --non-interactive install -y curl >/dev/null 2>&1 || true
 fi
-NEST_MIRROR_BASE="$BASE" NEST_KEYS_BASE="$KEYS_BASE" bash <(curl -fsSL "$BASE/install.sh")
+NEST_MIRROR_BASE="$BASE" NEST_KEYS_BASE="$KEYS_BASE" NEST_KEY_FPR="$(curl -fsSL "$BASE/key.fpr")" bash <(curl -fsSL "$BASE/install.sh")
 echo "-- nest version: $(nest version)"
 nest help | head -2
 if command -v dpkg >/dev/null 2>&1; then

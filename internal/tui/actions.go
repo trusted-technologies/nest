@@ -75,7 +75,7 @@ func (a *app) restore() error {
 	job := a.cfg.Jobs[idx].Name
 
 	snapshot := "latest"
-	target := "/tmp/nest-restore"
+	target := "/var/lib/nest/restore"
 	err = runFields(
 		huh.NewInput().Title("Snapshot ID").Value(&snapshot).Validate(validateRequired),
 		huh.NewInput().Title("Restore to directory").Value(&target).Validate(validateRequired),

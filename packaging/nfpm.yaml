@@ -9,6 +9,10 @@ name: nest
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
+# Epoch 1: Fedora's own repositories ship an unrelated "nest" package
+# (a neural simulator) at version 3.x — without the epoch dnf would prefer
+# it over ours (1.0.x) on Fedora/EPEL systems. Epoch wins any comparison.
+epoch: "1"
 section: admin
 priority: optional
 maintainer: nest <repo@trust-me.host>
@@ -39,6 +43,9 @@ contents:
     file_info:
       mode: 0640
 recommends:
+  # Not hard dependencies: on EOL distros with dead repos a hard Depends
+  # makes nest uninstallable. nest downloads restic/rclone itself when
+  # missing, and warns clearly when TLS roots are absent.
   - ca-certificates
   - restic
   - rclone

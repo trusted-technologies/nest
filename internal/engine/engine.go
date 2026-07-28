@@ -144,7 +144,7 @@ func (e *Engine) RunRestore(ctx context.Context, jobName, snapshot, target, incl
 	if snapshot == "" {
 		snapshot = "latest"
 	}
-	if err := os.MkdirAll(target, 0o755); err != nil {
+	if err := os.MkdirAll(target, 0o700); err != nil {
 		return fmt.Errorf("create restore target %s: %w", target, err)
 	}
 	args := append(base, "restore", snapshot, "--target", target)
@@ -278,6 +278,8 @@ func (e *Engine) resticJobAndRemote(jobName string) (*config.Job, *config.Remote
 
 // runCmd runs name with args, returning its stdout. stderr is captured and
 // embedded in the error on failure; stdout is logged at debug level.
+// Command lines go through redactArgs: errors are logged and forwarded to
+// notifiers (Telegram), so they must never carry secrets.
 func (e *Engine) runCmd(ctx context.Context, name string, args []string, env []string, stdin io.Reader) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if env != nil {
@@ -287,15 +289,30 @@ func (e *Engine) runCmd(ctx context.Context, name string, args []string, env []s
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	e.debugf("exec: %s %s", name, strings.Join(args, " "))
+	e.debugf("exec: %s %s", name, strings.Join(redactArgs(args), " "))
 	err := cmd.Run()
 	if s := strings.TrimSpace(stdout.String()); s != "" {
 		e.debugf("%s stdout:\n%s", name, s)
 	}
 	if err != nil {
-		return stdout.String(), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.String(), fmt.Errorf("%s %s: %w: %s", name, strings.Join(redactArgs(args), " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
+}
+
+// redactArgs returns args with inline-password options masked
+// (e.g. mysqldump's -p<secret>). Secrets should travel via environment
+// variables, not argv; this is a safety net for regressions.
+func redactArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if len(a) > 2 && strings.HasPrefix(a, "-p") {
+			out[i] = "-p***"
+		} else {
+			out[i] = a
+		}
+	}
+	return out
 }
 
 // runPipeline wires producer's stdout into consumer's stdin and runs both,
@@ -310,7 +327,7 @@ func (e *Engine) runPipeline(producer, consumer *exec.Cmd) error {
 		return fmt.Errorf("pipe %s: %w", producer.Args[0], err)
 	}
 	consumer.Stdin = pipe
-	e.debugf("pipeline: %s | %s", strings.Join(producer.Args, " "), strings.Join(consumer.Args, " "))
+	e.debugf("pipeline: %s | %s", strings.Join(redactArgs(producer.Args), " "), strings.Join(redactArgs(consumer.Args), " "))
 	if err := producer.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", producer.Args[0], err)
 	}

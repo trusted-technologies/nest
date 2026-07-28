@@ -108,7 +108,7 @@ func run(args []string) int {
 		f := newFlagSet("restore")
 		job := f.String("job", "", "job to restore")
 		snapshot := f.String("snapshot", "latest", "snapshot to restore")
-		target := f.String("target", "/tmp/nest-restore", "restore destination")
+		target := f.String("target", "/var/lib/nest/restore", "restore destination")
 		path := f.String("path", "", "restore only files matching this path")
 		if code := parseFlags(f, rest); code >= 0 {
 			return code

@@ -97,7 +97,7 @@ func (e *Engine) resticEnv(job *config.Job, r *config.Remote) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(config.CacheDir, 0o755); err != nil {
+	if err := os.MkdirAll(config.CacheDir, 0o700); err != nil {
 		e.debugf("cannot create cache dir %s: %v", config.CacheDir, err)
 	}
 	env := append(os.Environ(),
@@ -245,18 +245,26 @@ func dbDefaults(job *config.Job) (host string, port int, user string) {
 // client then uses the default unix socket — the same as `sudo mysql` —
 // which makes passwordless socket auth (auth_socket/unix_socket) work.
 // "127.0.0.1" or any other host goes over TCP as before.
-func mysqlArgs(job *config.Job) []string {
+//
+// The password is NOT placed into argv (`-p<pw>`): it would be visible in
+// /proc/<pid>/cmdline to other local users and would leak into nest's own
+// error messages (which embed the full argv) and from there into logs and
+// Telegram notifications. It travels via the MYSQL_PWD environment
+// variable instead — /proc/<pid>/environ of a root process is not readable
+// by other users. (MySQL itself warns that MYSQL_PWD is insecure only
+// because of ancient shared-system argv sniffing; env is the lesser evil
+// and the same channel PostgreSQL's PGPASSWORD uses.)
+func mysqlArgs(job *config.Job) (args []string, env map[string]string) {
 	host, port, user := dbDefaults(job)
-	var args []string
 	if host == "localhost" {
 		args = []string{"-u", user}
 	} else {
 		args = []string{"-h", host, "-P", strconv.Itoa(port), "-u", user}
 	}
 	if job.DBPassword != "" {
-		args = append(args, "-p"+job.DBPassword)
+		env = map[string]string{"MYSQL_PWD": job.DBPassword}
 	}
-	return args
+	return args, env
 }
 
 // pgArgs builds the common connection arguments and environment for
@@ -272,46 +280,82 @@ func pgArgs(job *config.Job) (args []string, env map[string]string) {
 
 // listDatabases returns the databases of a job: the explicit list when
 // configured, otherwise all non-system databases discovered on the server.
+// Names are validated — a hostile database name (possible when an
+// unprivileged user holds CREATEDB on the server) must never become a
+// command-line option or a filesystem path further down the pipeline.
 func (e *Engine) listDatabases(ctx context.Context, job *config.Job) ([]string, error) {
-	if len(job.Databases) > 0 {
-		return job.Databases, nil
-	}
-	var out string
-	var err error
-	switch job.Type {
-	case config.JobMySQL:
-		args := append(mysqlArgs(job), "-N", "-B", "-e", "SHOW DATABASES;")
-		out, err = e.runCmd(ctx, "mysql", args, nil, nil)
-	case config.JobPostgreSQL:
-		args, penv := pgArgs(job)
-		args = append(args, "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;", "postgres")
-		out, err = e.runCmd(ctx, "psql", args, envList(os.Environ(), penv), nil)
-	default:
-		return nil, fmt.Errorf("job %q: unsupported database type %q", job.Name, job.Type)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("job %q: list databases: %w", job.Name, err)
-	}
 	var dbs []string
-	for _, line := range strings.Split(out, "\n") {
-		name := strings.TrimSpace(line)
-		if name == "" || isSystemDB(name) {
-			continue
+	if len(job.Databases) > 0 {
+		dbs = job.Databases
+	} else {
+		var out string
+		var err error
+		switch job.Type {
+		case config.JobMySQL:
+			args, menv := mysqlArgs(job)
+			args = append(args, "-N", "-B", "-e", "SHOW DATABASES;")
+			out, err = e.runCmd(ctx, "mysql", args, envList(os.Environ(), menv), nil)
+		case config.JobPostgreSQL:
+			args, penv := pgArgs(job)
+			args = append(args, "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;", "postgres")
+			out, err = e.runCmd(ctx, "psql", args, envList(os.Environ(), penv), nil)
+		default:
+			return nil, fmt.Errorf("job %q: unsupported database type %q", job.Name, job.Type)
 		}
-		dbs = append(dbs, name)
+		if err != nil {
+			return nil, fmt.Errorf("job %q: list databases: %w", job.Name, err)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			name := strings.TrimSpace(line)
+			if name == "" || isSystemDB(name) {
+				continue
+			}
+			dbs = append(dbs, name)
+		}
+	}
+	for _, db := range dbs {
+		if err := validDBName(db); err != nil {
+			return nil, fmt.Errorf("job %q: refusing to back up database with unsafe name %q: %w", job.Name, db, err)
+		}
 	}
 	return dbs, nil
 }
 
+// validDBName rejects database names that could smuggle command-line
+// options (leading '-'), filesystem paths ('/', '\') or control characters
+// (including '\n', which would break line-based parsing) into dump
+// commands, archive file names and restic's --stdin-filename.
+func validDBName(name string) error {
+	if name == "" {
+		return fmt.Errorf("empty name")
+	}
+	if name[0] == '-' {
+		return fmt.Errorf("must not start with '-'")
+	}
+	for _, r := range name {
+		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("must not contain slashes or control characters")
+		}
+	}
+	return nil
+}
+
 // dumpCommand returns the command that dumps one database to its stdout.
+// The database name is preceded by "--" so that getopt-style option
+// parsing in mysqldump/pg_dump can never mistake it for a flag.
 func (e *Engine) dumpCommand(ctx context.Context, job *config.Job, db string) (*exec.Cmd, error) {
 	switch job.Type {
 	case config.JobMySQL:
-		args := append(mysqlArgs(job), db)
-		return exec.CommandContext(ctx, "mysqldump", args...), nil
+		args, menv := mysqlArgs(job)
+		args = append(args, "--", db)
+		cmd := exec.CommandContext(ctx, "mysqldump", args...)
+		if len(menv) > 0 {
+			cmd.Env = envList(os.Environ(), menv)
+		}
+		return cmd, nil
 	case config.JobPostgreSQL:
 		args, penv := pgArgs(job)
-		args = append(args, db)
+		args = append(args, "--", db)
 		cmd := exec.CommandContext(ctx, "pg_dump", args...)
 		if len(penv) > 0 {
 			cmd.Env = envList(os.Environ(), penv)
