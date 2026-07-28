@@ -26,14 +26,8 @@ var RepoPublicKey []byte
 
 // BinaryName maps the running GOARCH to the arch suffix used on the mirror.
 func ArchSuffix(goarch string) string {
-	switch goarch {
-	case "amd64":
-		return "amd64"
-	case "arm64":
-		return "arm64"
-	case "arm":
+	if goarch == "arm" {
 		return "armhf"
-	default:
-		return goarch
 	}
+	return goarch
 }

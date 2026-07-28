@@ -66,19 +66,14 @@ func SecureClient(timeout time.Duration) *http.Client {
 
 // FetchText GETs url and returns the trimmed body (max maxTextSize).
 func FetchText(ctx context.Context, client *http.Client, url string) (string, error) {
-	data, err := fetch(ctx, client, url, maxTextSize)
+	data, err := fetch(ctx, client, url)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
 }
 
-// FetchRaw GETs url and returns the raw body (max maxTextSize).
-func FetchRaw(ctx context.Context, client *http.Client, url string) ([]byte, error) {
-	return fetch(ctx, client, url, maxTextSize)
-}
-
-func fetch(ctx context.Context, client *http.Client, url string, limit int64) ([]byte, error) {
+func fetch(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -91,12 +86,12 @@ func fetch(ctx context.Context, client *http.Client, url string, limit int64) ([
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %s", resp.Status)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxTextSize+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("response exceeds %d bytes", limit)
+	if int64(len(data)) > maxTextSize {
+		return nil, fmt.Errorf("response exceeds %d bytes", maxTextSize)
 	}
 	return data, nil
 }
@@ -166,18 +161,18 @@ func checkELF(path string) error {
 // mode is fatal: there is no "skip verification" path.
 func VerifySignedSum(ctx context.Context, client *http.Client, path, fileName string) error {
 	sumsURL := buildinfo.MirrorBaseURL + "/bin/sha256sums.txt"
-	sums, err := FetchRaw(ctx, client, sumsURL)
+	sums, err := fetch(ctx, client, sumsURL)
 	if err != nil {
 		return fmt.Errorf("cannot fetch %s (refusing unverified download): %w", sumsURL, err)
 	}
-	sig, err := FetchRaw(ctx, client, sumsURL+".asc")
+	sig, err := fetch(ctx, client, sumsURL+".asc")
 	if err != nil {
 		return fmt.Errorf("cannot fetch %s.asc (refusing unsigned checksums): %w", sumsURL, err)
 	}
 	if err := verifySignature(sums, sig); err != nil {
 		return fmt.Errorf("invalid signature on %s: %w", sumsURL, err)
 	}
-	want, ok := ParseSums(sums)[fileName]
+	want, ok := parseSums(sums)[fileName]
 	if !ok {
 		return fmt.Errorf("%s: no entry for %s (refusing unverified download)", sumsURL, fileName)
 	}
@@ -207,9 +202,9 @@ func verifySignature(data, sig []byte) error {
 	return err
 }
 
-// ParseSums parses sha256sums.txt style content: lines of "<hex>  <name>"
+// parseSums parses sha256sums.txt style content: lines of "<hex>  <name>"
 // (a "*" prefix on the name marks binary mode and is stripped).
-func ParseSums(data []byte) map[string]string {
+func parseSums(data []byte) map[string]string {
 	sums := map[string]string{}
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(line)

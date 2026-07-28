@@ -13,7 +13,7 @@ not a valid line
 too many fields here buddy
 
 `)
-	sums := ParseSums(data)
+	sums := parseSums(data)
 	if got := sums["restic-linux-amd64"]; got != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" {
 		t.Errorf("restic-linux-amd64: got %q", got)
 	}

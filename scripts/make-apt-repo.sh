@@ -84,6 +84,5 @@ gpg --batch --verify dists/stable/InRelease 2>&1 | grep -q "Good signature" \
     || { echo "error: InRelease does not verify against the exported key" >&2; exit 1; }
 gpg --batch --verify dists/stable/Release.gpg dists/stable/Release 2>&1 | grep -q "Good signature" \
     || { echo "error: Release.gpg does not verify against the exported key" >&2; exit 1; }
-unset GNUPGHOME
 
 echo ">> apt repo ready at $repo"

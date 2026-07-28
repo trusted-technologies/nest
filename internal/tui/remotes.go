@@ -94,9 +94,10 @@ func remoteSummary(r *config.Remote) string {
 }
 
 // pickRemote asks the user to choose a remote and returns its index
-// (-1 when there are none).
+// (-1 when there are none; the user is told in that case).
 func (a *app) pickRemote(title string) (int, error) {
 	if len(a.cfg.Remotes) == 0 {
+		showNote("No remotes", "Add a remote first.")
 		return -1, nil
 	}
 	opts := make([]huh.Option[int], 0, len(a.cfg.Remotes))
@@ -108,21 +109,6 @@ func (a *app) pickRemote(title string) (int, error) {
 		return -1, err
 	}
 	return idx, nil
-}
-
-// uniqueRemoteName validates that a remote name is non-empty and unique,
-// excluding origName (the name before an edit).
-func (a *app) uniqueRemoteName(origName string) func(string) error {
-	return func(s string) error {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			return fmt.Errorf("name is required")
-		}
-		if s != origName && a.cfg.FindRemote(s) != nil {
-			return fmt.Errorf("a remote named %q already exists", s)
-		}
-		return nil
-	}
 }
 
 // addRemote asks for a type and runs the matching remote form.
@@ -169,7 +155,6 @@ func (a *app) editRemote() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No remotes", "Add a remote first.")
 		return nil
 	}
 	origName := a.cfg.Remotes[idx].Name
@@ -203,7 +188,6 @@ func (a *app) deleteRemote() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No remotes", "Nothing to delete.")
 		return nil
 	}
 	r := &a.cfg.Remotes[idx]
@@ -240,7 +224,7 @@ func (a *app) remoteForm(r *config.Remote, origName string) error {
 			Title("Name").
 			Description("Unique name; jobs reference the remote by it.").
 			Value(&r.Name).
-			Validate(a.uniqueRemoteName(origName)),
+			Validate(uniqueName(origName, func(s string) bool { return a.cfg.FindRemote(s) != nil })),
 	}
 	port := ""
 	switch r.Type {
@@ -316,7 +300,6 @@ func (a *app) testRemote() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No remotes", "Add a remote first.")
 		return nil
 	}
 	msg, ok := checkRemote(&a.cfg.Remotes[idx])

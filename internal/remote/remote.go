@@ -5,21 +5,16 @@ package remote
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/trusted-technologies/nest/internal/config"
 )
 
-// joinPrefix joins path fragments, dropping empty ones and duplicate slashes.
+// joinPrefix joins path fragments, dropping empty ones, duplicate slashes
+// and any leading slash (rclone/s3 targets must be relative).
 func joinPrefix(parts ...string) string {
-	var clean []string
-	for _, p := range parts {
-		p = strings.Trim(p, "/")
-		if p != "" {
-			clean = append(clean, p)
-		}
-	}
-	return strings.Join(clean, "/")
+	return strings.TrimPrefix(path.Join(parts...), "/")
 }
 
 // normalizeEndpoint ensures the endpoint has an https:// scheme.
@@ -46,14 +41,9 @@ func ResticRepository(r *config.Remote, jobName string) (string, error) {
 		if port == 0 {
 			port = 22
 		}
-		// restic sftp syntax: sftp:user@host:port/path — path is relative
-		// to the login dir unless it starts with "/".
-		path := "/" + base
-		if strings.HasPrefix(r.PathPrefix, "/") {
-			path = joinPrefix(r.PathPrefix, "nest", jobName)
-			path = "/" + strings.TrimPrefix(path, "/")
-		}
-		return fmt.Sprintf("sftp:%s@%s:%d%s", r.User, r.Host, port, path), nil
+		// restic sftp syntax: sftp:user@host:port/path — always absolute,
+		// so an absolute path_prefix keeps working unchanged.
+		return fmt.Sprintf("sftp:%s@%s:%d/%s", r.User, r.Host, port, base), nil
 	case config.RemoteRclone:
 		return fmt.Sprintf("rclone:%s/%s", strings.TrimSuffix(r.RcloneRemote, "/"), base), nil
 	}

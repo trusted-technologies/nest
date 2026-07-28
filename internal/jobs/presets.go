@@ -7,7 +7,6 @@ import "github.com/trusted-technologies/nest/internal/config"
 
 // Preset is a job template shown in the "add job" dialog.
 type Preset struct {
-	ID          string
 	Title       string
 	Description string
 	Job         config.Job
@@ -17,13 +16,11 @@ type Preset struct {
 func Presets() []Preset {
 	return []Preset{
 		{
-			ID:          "pterodactyl-volumes",
 			Title:       "Pterodactyl Volumes",
 			Description: "Game server data (/var/lib/pterodactyl/volumes)",
 			Job: config.Job{
 				Name:        "pterodactyl-volumes",
 				Type:        config.JobFolder,
-				Preset:      "pterodactyl-volumes",
 				Source:      "/var/lib/pterodactyl/volumes",
 				Incremental: true,
 				Schedule:    "04:00",
@@ -32,13 +29,11 @@ func Presets() []Preset {
 			},
 		},
 		{
-			ID:          "pterodactyl-backups",
 			Title:       "Pterodactyl Backups",
 			Description: "Panel-created backups (/var/lib/pterodactyl/backups)",
 			Job: config.Job{
 				Name:        "pterodactyl-backups",
 				Type:        config.JobFolder,
-				Preset:      "pterodactyl-backups",
 				Source:      "/var/lib/pterodactyl/backups",
 				Incremental: true,
 				Schedule:    "05:00",
@@ -47,7 +42,6 @@ func Presets() []Preset {
 			},
 		},
 		{
-			ID:          "folder",
 			Title:       "Folder",
 			Description: "Any directory (websites, configs, app data)",
 			Job: config.Job{
@@ -61,7 +55,6 @@ func Presets() []Preset {
 			},
 		},
 		{
-			ID:          "mysql",
 			Title:       "MySQL / MariaDB",
 			Description: "Database dumps streamed to storage (mysqldump)",
 			Job: config.Job{
@@ -77,7 +70,6 @@ func Presets() []Preset {
 			},
 		},
 		{
-			ID:          "postgresql",
 			Title:       "PostgreSQL",
 			Description: "Database dumps streamed to storage (pg_dump)",
 			Job: config.Job{

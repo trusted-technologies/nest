@@ -130,7 +130,6 @@ EOF
 # ubuntu:16.04 is EOL and gone from all public apt mirrors, so curl cannot be
 # installed from its repos. Mount a static curl in instead — the thing being
 # tested is apt 1.2's signed-by + InRelease verification, not xenial's repos.
-EXTRA_ARGS=()
 for img in "${IMAGES[@]}"; do
     if [ "$img" = "ubuntu:16.04" ] && [ ! -x .tools/curl-amd64 ]; then
         echo "== fetching static curl for the xenial test =="

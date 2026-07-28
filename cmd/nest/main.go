@@ -36,7 +36,7 @@ Commands:
   restore               restore a restic snapshot
       --job NAME          job to restore (required)
       --snapshot ID       snapshot to restore (default "latest")
-      --target DIR        restore destination (default /tmp/nest-restore)
+      --target DIR        restore destination (default /var/lib/nest/restore)
       --path P            restore only files matching P
   jobs                  list configured backup jobs
   remotes               list configured remotes

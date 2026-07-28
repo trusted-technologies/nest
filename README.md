@@ -196,73 +196,28 @@ systemctl list-timers nest.timer    # next scheduled run
 
 ## Configuration reference
 
-`/etc/nest/config.yml` (mode 0600) is plain YAML. It is normally managed by `nest setup`; the annotated example below (also shipped as `/etc/nest/config.yml.example`) shows every field:
+`/etc/nest/config.yml` (mode 0600) is plain YAML, normally managed by `nest setup`. A fully annotated example showing every field ships as [`/etc/nest/config.yml.example`](packaging/config.yml.example) (and as `packaging/config.yml.example` in this repo). Minimal sketch:
 
 ```yaml
-version: 1                          # config format version
-
-# Default restic repository password (per-job override: restic_password).
-# May also come from the NEST_RESTIC_PASSWORD environment variable.
-encryption_password: "change-me-long-random-string"
+encryption_password: "change-me-long-random-string"   # or NEST_RESTIC_PASSWORD
 
 remotes:
   - name: my-s3                     # referenced by jobs[].remote
     type: s3                        # s3 | sftp | rclone
     endpoint: s3.eu-central-1.amazonaws.com
-    region: eu-central-1
     bucket: my-backup-bucket
     access_key: AKIAEXAMPLE
     secret_key: "super-secret"
-    path_prefix: web-1              # optional path prefix for all repos
-
-  - name: backup-server
-    type: sftp
-    host: 192.0.2.10
-    port: 22
-    user: backup
-    key_file: /etc/nest/ssh/id_ed25519
-
-  # - name: gdrive
-  #   type: rclone
-  #   rclone_remote: gdrive:backups # a remote from `rclone config`
 
 jobs:
   - name: pterodactyl-volumes
     type: folder                    # folder | mysql | postgresql
-    preset: pterodactyl-volumes     # informational: preset the job came from
     source: /var/lib/pterodactyl/volumes
     remote: my-s3
     incremental: true               # true = restic, false = .tar.gz archives
     schedule: "04:00"               # "HH:MM" or 5-field cron; empty = every tick
-    retention:
-      last: 0
-      daily: 3
-      weekly: 1
-      monthly: 0
-    exclude:
-      - "*/cache/**"
+    retention: {daily: 3, weekly: 1}
     enabled: true
-
-  - name: mysql
-    type: mysql
-    remote: backup-server
-    incremental: true
-    schedule: "03:00"
-    retention:
-      daily: 7
-    db_host: localhost
-    db_port: 3306
-    db_user: root
-    db_password: "secret"
-    databases: []                   # empty = all databases
-    enabled: true
-
-notifications:
-  telegram:
-    enabled: false
-    bot_token: "123456:ABC-your-bot-token"
-    chat_id: "123456789"
-    thread_id: ""                   # optional forum topic id
 ```
 
 Paths used by nest:

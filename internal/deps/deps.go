@@ -47,8 +47,7 @@ func Ensure(name string) (string, error) {
 	url := buildinfo.MirrorBaseURL + "/bin/" + fileName
 	log.Printf("downloading %s from %s", name, url)
 
-	ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
-	defer cancel()
+	ctx := context.Background()
 	client := mirror.SecureClient(downloadTimeout)
 
 	tmp, err := os.CreateTemp(dir, name+"-*.download")

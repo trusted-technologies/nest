@@ -46,16 +46,16 @@ pack() { # arch formats...
     arch="$1"; shift
     src="dist/bin/nest-linux-$arch"
     [ -f "$src" ] || { echo "error: $src missing — run scripts/build.sh first" >&2; exit 1; }
+    tmp_cfg="$(mktemp)"
+    sed -e "s|\${ARCH}|$arch|g" \
+        -e "s|\${VERSION}|$VERSION|g" \
+        -e "s|\${SRC}|$src|g" \
+        packaging/nfpm.yaml > "$tmp_cfg"
     for fmt in "$@"; do
         echo ">> nfpm: nest $VERSION linux/$arch -> $fmt"
-        tmp_cfg="$(mktemp)"
-        sed -e "s|\${ARCH}|$arch|g" \
-            -e "s|\${VERSION}|$VERSION|g" \
-            -e "s|\${SRC}|$src|g" \
-            packaging/nfpm.yaml > "$tmp_cfg"
         "$NFPM" package --config "$tmp_cfg" --packager "$fmt" --target dist/packages/
-        rm -f "$tmp_cfg"
     done
+    rm -f "$tmp_cfg"
 }
 
 pack amd64 deb rpm

@@ -82,9 +82,8 @@ type Remote struct {
 
 // Job describes a single backup object.
 type Job struct {
-	Name   string `yaml:"name"`
-	Type   string `yaml:"type"` // folder | mysql | postgresql
-	Preset string `yaml:"preset,omitempty"`
+	Name string `yaml:"name"`
+	Type string `yaml:"type"` // folder | mysql | postgresql
 
 	// Source is the directory to back up (folder jobs).
 	Source string `yaml:"source,omitempty"`

@@ -58,7 +58,6 @@ jobs:
     # folder, mysql, postgresql (a preset only pre-fills the fields below).
   - name: pterodactyl-volumes
     type: folder                      # folder | mysql | postgresql
-    preset: pterodactyl-volumes
     source: /var/lib/pterodactyl/volumes
     remote: my-s3                     # must match a remotes[].name
     incremental: true                 # true = restic, false = plain .tar.gz

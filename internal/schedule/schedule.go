@@ -41,17 +41,9 @@ func Due(s string, now time.Time, window time.Duration) (bool, error) {
 	if s == "" {
 		return true, nil
 	}
+	// "HH:MM" is just a daily cron.
 	if m := hhmmRe.FindStringSubmatch(s); m != nil {
-		var hour, min int
-		fmt.Sscanf(s, "%d:%d", &hour, &min)
-		scheduled := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, now.Location())
-		if now.Before(scheduled) {
-			// The activation may belong to the previous day when the
-			// tick lands just after midnight.
-			scheduled = scheduled.Add(-24 * time.Hour)
-		}
-		diff := now.Sub(scheduled)
-		return diff >= 0 && diff < window, nil
+		s = m[2] + " " + m[1] + " * * *"
 	}
 	sched, err := cronParser.Parse(s)
 	if err != nil {

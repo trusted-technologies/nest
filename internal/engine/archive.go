@@ -87,9 +87,6 @@ func (e *Engine) archiveDB(ctx context.Context, bin string, env []string, job *c
 	if err != nil {
 		return err
 	}
-	if len(dbs) == 0 {
-		return fmt.Errorf("job %q: no databases to back up", job.Name)
-	}
 	tmp, err := os.MkdirTemp("", "nest-archive-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
@@ -134,7 +131,7 @@ func (e *Engine) archiveRetention(ctx context.Context, bin string, env []string,
 	if keep == 0 {
 		keep = defaultArchiveKeep
 	}
-	out, err := e.runCmd(ctx, bin, []string{"lsf", strings.TrimSuffix(target, "/") + "/", "--files-only"}, env, nil)
+	out, err := e.runCmd(ctx, bin, []string{"lsf", strings.TrimSuffix(target, "/") + "/", "--files-only"}, env)
 	if err != nil {
 		return fmt.Errorf("list archives: %w", err)
 	}
@@ -147,7 +144,7 @@ func (e *Engine) archiveRetention(ctx context.Context, bin string, env []string,
 	sort.Strings(names)
 	for _, old := range retentionDelete(names, keep) {
 		e.Log.Printf("deleting old archive %s", old)
-		if _, err := e.runCmd(ctx, bin, []string{"deletefile", strings.TrimSuffix(target, "/") + "/" + old}, env, nil); err != nil {
+		if _, err := e.runCmd(ctx, bin, []string{"deletefile", strings.TrimSuffix(target, "/") + "/" + old}, env); err != nil {
 			return fmt.Errorf("delete archive %s: %w", old, err)
 		}
 	}

@@ -63,9 +63,7 @@ cp dist/tools/bin/* "$staging/bin/"
 # have no VERSION file — then /nest/VERSION on the mirror is left as-is,
 # so servers are not offered a dev binary via self-update.
 VERSION_FILE=""
-for f in dist/VERSION VERSION; do
-    [ -f "$f" ] && VERSION_FILE="$f" && break
-done
+[ -f VERSION ] && VERSION_FILE=VERSION
 if [ -z "$VERSION_FILE" ]; then
     echo ">> warning: no VERSION file (dev publish) — /nest/VERSION stays unchanged"
 fi

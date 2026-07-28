@@ -57,7 +57,7 @@ func (n *Notifier) Failure(job string, err error) {
 
 // send posts a message to the configured chat. Errors are only logged.
 func (n *Notifier) send(text string) {
-	if n == nil || !n.cfg.Enabled || n.cfg.BotToken == "" || n.cfg.ChatID == "" {
+	if !n.cfg.Enabled || n.cfg.BotToken == "" || n.cfg.ChatID == "" {
 		return
 	}
 	form := url.Values{

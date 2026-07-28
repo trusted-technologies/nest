@@ -118,12 +118,6 @@ func genPassword(n int) (string, error) {
 	return string(b), nil
 }
 
-// splitLines splits a textarea value into trimmed non-empty lines.
-func splitLines(s string) []string { return splitClean(strings.Split(s, "\n")) }
-
-// splitComma splits a comma-separated value into trimmed non-empty items.
-func splitComma(s string) []string { return splitClean(strings.Split(s, ",")) }
-
 // splitClean trims parts and drops empty ones.
 func splitClean(parts []string) []string {
 	var out []string
@@ -133,6 +127,21 @@ func splitClean(parts []string) []string {
 		}
 	}
 	return out
+}
+
+// uniqueName validates that a name is non-empty and unique, excluding
+// origName (the name before an edit). exists checks the current config.
+func uniqueName(origName string, exists func(string) bool) func(string) error {
+	return func(s string) error {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return fmt.Errorf("name is required")
+		}
+		if s != origName && exists(s) {
+			return fmt.Errorf("name %q is already taken", s)
+		}
+		return nil
+	}
 }
 
 // runNest re-executes the nest binary with args, inheriting stdio so the

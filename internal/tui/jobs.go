@@ -83,9 +83,10 @@ func jobLabel(j *config.Job) string {
 }
 
 // pickJob asks the user to choose a job and returns its index
-// (-1 when there are none).
+// (-1 when there are none; the user is told in that case).
 func (a *app) pickJob(title string) (int, error) {
 	if len(a.cfg.Jobs) == 0 {
+		showNote("No jobs", "Add a job first.")
 		return -1, nil
 	}
 	opts := make([]huh.Option[int], 0, len(a.cfg.Jobs))
@@ -97,21 +98,6 @@ func (a *app) pickJob(title string) (int, error) {
 		return -1, err
 	}
 	return idx, nil
-}
-
-// uniqueJobName validates that a job name is non-empty and unique,
-// excluding origName (the name before an edit).
-func (a *app) uniqueJobName(origName string) func(string) error {
-	return func(s string) error {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			return fmt.Errorf("name is required")
-		}
-		if s != origName && a.cfg.FindJob(s) != nil {
-			return fmt.Errorf("a job named %q already exists", s)
-		}
-		return nil
-	}
 }
 
 // addJob offers the built-in presets and runs the job form prefilled from
@@ -163,7 +149,6 @@ func (a *app) editJob() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No jobs", "Add a job first.")
 		return nil
 	}
 	j := a.cfg.Jobs[idx]
@@ -188,7 +173,6 @@ func (a *app) deleteJob() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No jobs", "Nothing to delete.")
 		return nil
 	}
 	ok, err := askConfirm(fmt.Sprintf("Delete job %q?", a.cfg.Jobs[idx].Name),
@@ -217,7 +201,6 @@ func (a *app) toggleJob() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No jobs", "Add a job first.")
 		return nil
 	}
 	a.cfg.Jobs[idx].Enabled = !a.cfg.Jobs[idx].Enabled
@@ -241,7 +224,7 @@ func (a *app) jobForm(j *config.Job, origName string) error {
 
 	groups := []*huh.Group{
 		huh.NewGroup(
-			huh.NewInput().Title("Name").Value(&j.Name).Validate(a.uniqueJobName(origName)),
+			huh.NewInput().Title("Name").Value(&j.Name).Validate(uniqueName(origName, func(s string) bool { return a.cfg.FindJob(s) != nil })),
 			huh.NewSelect[string]().
 				Title("Remote").
 				Description("Where this job's backups are stored.").
@@ -322,7 +305,7 @@ func (a *app) jobForm(j *config.Job, origName string) error {
 
 	j.Name = strings.TrimSpace(j.Name)
 	j.Schedule = strings.TrimSpace(j.Schedule)
-	j.Exclude = splitLines(excludes)
+	j.Exclude = splitClean(strings.Split(excludes, "\n"))
 	j.Retention = config.Retention{
 		Last:    parseOptInt(last),
 		Daily:   parseOptInt(daily),
@@ -331,7 +314,7 @@ func (a *app) jobForm(j *config.Job, origName string) error {
 	}
 	if j.Type == config.JobMySQL || j.Type == config.JobPostgreSQL {
 		j.DBPort, _ = strconv.Atoi(strings.TrimSpace(dbPort))
-		j.Databases = splitComma(databases)
+		j.Databases = splitClean(strings.Split(databases, ","))
 	}
 	return nil
 }

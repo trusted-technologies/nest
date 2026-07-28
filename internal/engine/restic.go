@@ -133,7 +133,7 @@ func (e *Engine) runResticJob(ctx context.Context, job *config.Job, r *config.Re
 
 // resticEnsureRepo initializes the repository if it does not exist yet.
 func (e *Engine) resticEnsureRepo(ctx context.Context, bin string, env, base []string) error {
-	_, err := e.runCmd(ctx, bin, append(base, "snapshots"), env, nil)
+	_, err := e.runCmd(ctx, bin, append(base, "snapshots"), env)
 	if err == nil {
 		return nil
 	}
@@ -141,7 +141,7 @@ func (e *Engine) resticEnsureRepo(ctx context.Context, bin string, env, base []s
 		return fmt.Errorf("check repository: %w", err)
 	}
 	e.Log.Printf("restic repository does not exist yet; running restic init")
-	if _, err := e.runCmd(ctx, bin, append(base, "init"), env, nil); err != nil {
+	if _, err := e.runCmd(ctx, bin, append(base, "init"), env); err != nil {
 		return fmt.Errorf("init repository: %w", err)
 	}
 	return nil
@@ -154,7 +154,7 @@ func (e *Engine) resticBackupFolder(ctx context.Context, bin string, env, base [
 	for _, ex := range job.Exclude {
 		args = append(args, "--exclude", ex)
 	}
-	_, err := e.runCmd(ctx, bin, args, env, nil)
+	_, err := e.runCmd(ctx, bin, args, env)
 	if err != nil && exitCode(err) == 3 {
 		e.Log.Printf("[%s] warning: some files could not be read (restic exit code 3); snapshot created anyway", job.Name)
 		return nil
@@ -168,9 +168,6 @@ func (e *Engine) resticBackupDB(ctx context.Context, bin string, env, base []str
 	dbs, err := e.listDatabases(ctx, job)
 	if err != nil {
 		return err
-	}
-	if len(dbs) == 0 {
-		return fmt.Errorf("job %q: no databases to back up", job.Name)
 	}
 	for _, db := range dbs {
 		e.Log.Printf("[%s] dumping database %s", job.Name, db)
@@ -209,7 +206,7 @@ func (e *Engine) resticForget(ctx context.Context, bin string, env, base []strin
 		args = append(args, "--keep-monthly", strconv.Itoa(rt.Monthly))
 	}
 	e.Log.Printf("[%s] applying retention policy", job.Name)
-	_, err := e.runCmd(ctx, bin, args, env, nil)
+	_, err := e.runCmd(ctx, bin, args, env)
 	return err
 }
 
@@ -294,11 +291,11 @@ func (e *Engine) listDatabases(ctx context.Context, job *config.Job) ([]string, 
 		case config.JobMySQL:
 			args, menv := mysqlArgs(job)
 			args = append(args, "-N", "-B", "-e", "SHOW DATABASES;")
-			out, err = e.runCmd(ctx, "mysql", args, envList(os.Environ(), menv), nil)
+			out, err = e.runCmd(ctx, "mysql", args, envList(os.Environ(), menv))
 		case config.JobPostgreSQL:
 			args, penv := pgArgs(job)
 			args = append(args, "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;", "postgres")
-			out, err = e.runCmd(ctx, "psql", args, envList(os.Environ(), penv), nil)
+			out, err = e.runCmd(ctx, "psql", args, envList(os.Environ(), penv))
 		default:
 			return nil, fmt.Errorf("job %q: unsupported database type %q", job.Name, job.Type)
 		}
@@ -317,6 +314,9 @@ func (e *Engine) listDatabases(ctx context.Context, job *config.Job) ([]string, 
 		if err := validDBName(db); err != nil {
 			return nil, fmt.Errorf("job %q: refusing to back up database with unsafe name %q: %w", job.Name, db, err)
 		}
+	}
+	if len(dbs) == 0 {
+		return nil, fmt.Errorf("job %q: no databases to back up", job.Name)
 	}
 	return dbs, nil
 }
@@ -349,17 +349,13 @@ func (e *Engine) dumpCommand(ctx context.Context, job *config.Job, db string) (*
 		args, menv := mysqlArgs(job)
 		args = append(args, "--", db)
 		cmd := exec.CommandContext(ctx, "mysqldump", args...)
-		if len(menv) > 0 {
-			cmd.Env = envList(os.Environ(), menv)
-		}
+		cmd.Env = envList(os.Environ(), menv)
 		return cmd, nil
 	case config.JobPostgreSQL:
 		args, penv := pgArgs(job)
 		args = append(args, "--", db)
 		cmd := exec.CommandContext(ctx, "pg_dump", args...)
-		if len(penv) > 0 {
-			cmd.Env = envList(os.Environ(), penv)
-		}
+		cmd.Env = envList(os.Environ(), penv)
 		return cmd, nil
 	}
 	return nil, fmt.Errorf("job %q: unsupported database type %q", job.Name, job.Type)

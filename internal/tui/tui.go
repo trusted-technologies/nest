@@ -47,10 +47,14 @@ func Run(configPath string, firstInstall bool) error {
 // mainMenu is the root select loop; it returns when the user exits.
 func (a *app) mainMenu() error {
 	for {
+		desc := "Config: " + a.configPath
+		if a.dirty {
+			desc += "  (unsaved changes)"
+		}
 		var choice string
 		err := runFields(huh.NewSelect[string]().
 			Title("nest — server backups").
-			Description("Config: "+a.configPath+unsavedMark(a.dirty)).
+			Description(desc).
 			Options(
 				huh.NewOption("Remotes — where backups are stored", "remotes"),
 				huh.NewOption("Jobs — what is backed up", "jobs"),
@@ -98,14 +102,6 @@ func (a *app) mainMenu() error {
 			return err
 		}
 	}
-}
-
-// unsavedMark renders the "unsaved changes" hint for the menu header.
-func unsavedMark(dirty bool) string {
-	if dirty {
-		return "  (unsaved changes)"
-	}
-	return ""
 }
 
 // confirmQuit reports whether the user may leave; with unsaved changes it

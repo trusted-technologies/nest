@@ -51,7 +51,6 @@ func (a *app) listSnapshots() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No jobs", "Add a job first.")
 		return nil
 	}
 	reportResult("Snapshots", runNest("snapshots", "--job", a.cfg.Jobs[idx].Name))
@@ -69,7 +68,6 @@ func (a *app) restore() error {
 		return err
 	}
 	if idx < 0 {
-		showNote("No jobs", "Add a job first.")
 		return nil
 	}
 	job := a.cfg.Jobs[idx].Name

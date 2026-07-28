@@ -109,11 +109,3 @@ func TestValidDBName(t *testing.T) {
 		}
 	}
 }
-
-func TestRedactArgs(t *testing.T) {
-	got := redactArgs([]string{"-u", "root", "-pSup3rSecret", "-N", "-p"})
-	want := []string{"-u", "root", "-p***", "-N", "-p"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
