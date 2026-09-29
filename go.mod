@@ -3,7 +3,7 @@ module github.com/trusted-technologies/nest
 go 1.25.0
 
 require (
-	github.com/ProtonMail/go-crypto v1.4.1
+	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/robfig/cron/v3 v3.0.1
